@@ -1,0 +1,74 @@
+# Four services on two 24 GB GPUs: an LLM split across both cards, plus speech-to-text,
+# text-to-speech and an embedding model sharing them.
+# The measured_mib values were read from nvidia-smi on two RTX 4090s while the stack was running.
+# `command` runs with `bash -c`; end it with `exec` so Ctrl+C / `mesh down` reach the real process.
+# Replace every path and image name with your own.
+services:
+  - name: llm
+    port: 8001
+    gpus: [0, 1]
+    gpu_memory_utilization: 0.6
+    measured_mib: {0: 16252, 1: 16252}   # 0.6 requested, 16252 MiB held per GPU
+    command: |
+      source ~/venvs/vllm/bin/activate
+      CUDA_VISIBLE_DEVICES=0,1 exec vllm serve /path/to/llm \
+        --served-model-name llm \
+        --port 8001 \
+        --host 0.0.0.0 \
+        --tensor-parallel-size 2 \
+        --gpu-memory-utilization 0.6 \
+        --max-model-len 16384
+
+  - name: stt
+    runtime: docker
+    port: 8004
+    gpus: [0]
+    gpu_memory_utilization: 0.25
+    measured_mib: {0: 6430}
+    stop: docker stop stt
+    command: |
+      exec docker run --rm \
+        --name stt \
+        --gpus all --ipc host \
+        -p 8004:8000 \
+        -v /path/to/models:/models \
+        my-stt-image:latest \
+        /models/stt-model \
+        --served-model-name stt \
+        --gpu-memory-utilization 0.25
+
+  - name: tts
+    runtime: docker
+    port: 8005
+    gpus: [1]
+    health: /docs
+    measured_mib: {1: 2348}   # a plain Python server: no vLLM fraction
+    stop: docker stop tts
+    command: |
+      # `--gpus '"device=1"'` shows the container only GPU 1, which becomes device 0 inside it.
+      # Do NOT also set CUDA_VISIBLE_DEVICES=1: that hides the only GPU and the model silently runs on the CPU.
+      exec docker run --rm \
+        --name tts \
+        --gpus '"device=1"' \
+        --ipc host \
+        -p 8005:8005 \
+        -v /path/to/models:/models \
+        my-tts-image:latest
+
+  - name: embed
+    runtime: docker
+    port: 8003
+    gpus: [1]
+    gpu_memory_utilization: 0.20
+    measured_mib: {1: 3054}
+    stop: docker stop embed
+    command: |
+      exec docker run --rm --name embed \
+        --gpus '"device=1"' -p 8003:8003 \
+        -v /path/to/models:/models \
+        vllm/vllm-openai:latest \
+        --model /models/embedding-model \
+        --served-model-name embed \
+        --port 8003 \
+        --gpu-memory-utilization 0.20 \
+        --max-model-len 8192

@@ -1,0 +1,12 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+dist/
+build/
+logs/
+*.pdf
+.DS_Store
+.claude/
+reddit threads/
+local/

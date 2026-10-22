@@ -1,0 +1,51 @@
+# A chat model plus an embedding model sharing one 24 GB GPU.
+# Copy this file, change the model paths, then:
+#
+#   mesh plan models.yaml     # will it fit?
+#   mesh up models.yaml       # start in order, wait for each, one log file each
+#
+# `command` runs with `bash -c`. End it with `exec ...` so Ctrl+C and `mesh down` reach the real process.
+# To use a virtualenv or conda env, activate it first:
+#   source ~/venvs/vllm/bin/activate      or      conda activate my-env
+#
+# overhead_mib is a rough allowance for memory beyond the fraction you ask for (CUDA graphs etc.).
+# On the RTX 4090 this project was built on, a vLLM service asking for 0.6 held about 1.8 GiB more.
+# Run `mesh up` once: it prints the memory each service really added. Put those numbers in
+# `measured_mib` and delete overhead_mib.
+margin_mib: 1024            # keep at least this much free on each GPU after everything starts
+
+services:
+  - name: chat
+    port: 8001
+    gpus: [0]
+    gpu_memory_utilization: 0.55
+    overhead_mib: 1500
+    command: |
+      source ~/venvs/vllm/bin/activate
+      exec vllm serve /path/to/chat-model \
+        --served-model-name chat \
+        --port 8001 \
+        --gpu-memory-utilization 0.55 \
+        --max-model-len 8192
+
+  - name: embeddings
+    port: 8003
+    gpus: [0]
+    gpu_memory_utilization: 0.15
+    overhead_mib: 500
+    command: |
+      source ~/venvs/vllm/bin/activate
+      exec vllm serve /path/to/embedding-model \
+        --served-model-name embeddings \
+        --port 8003 \
+        --gpu-memory-utilization 0.15 \
+        --max-model-len 8192
+
+  # A container works the same way. Add `stop:` so `mesh down` stops it cleanly.
+  # - name: stt
+  #   port: 8004
+  #   gpus: [0]
+  #   measured_mib: {0: 3000}
+  #   stop: docker stop stt
+  #   command: |
+  #     exec docker run --rm --name stt --gpus all -p 8004:8000 my-stt-image:latest
