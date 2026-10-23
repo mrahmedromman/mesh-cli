@@ -57,6 +57,7 @@ seconds.
 | `src/mesh_cli/holders.py` | working out who holds GPU memory (`mesh gpu`) |
 | `src/mesh_cli/planner.py` | the memory simulation |
 | `src/mesh_cli/runner.py` | starting, health-checking, logging and stopping services |
+| `src/mesh_cli/ui.py` | colour, tables, memory bars and the live start-up line (terminal only) |
 | `src/mesh_cli/cli.py` | the `mesh` command |
 | `tests/` | tests, with real `nvidia-smi` output in `tests/fixtures/` |
 | `examples/`, `docs/` | example configs and the documentation |

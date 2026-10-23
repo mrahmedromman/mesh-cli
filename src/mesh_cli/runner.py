@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -42,6 +43,19 @@ def tail_lines(path: Path, count: int) -> str:
             return "".join(deque(handle, maxlen=count))
     except OSError:
         return ""
+
+
+def last_line(path: Path, size: int = 4096) -> str:
+    """The most recent non-empty line of a log, reading only its tail. A progress bar that redraws itself counts as one line per redraw."""
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, 2)
+            handle.seek(max(0, handle.tell() - size))
+            data = handle.read().decode(errors="replace")
+    except OSError:
+        return ""
+    lines = [line for line in re.split(r"[\r\n]+", data) if line.strip()]
+    return lines[-1] if lines else ""
 
 
 def probe(port: int, path: str, timeout: float = 3.0) -> int | None:
@@ -111,8 +125,10 @@ def wait_healthy(
     probe_fn: Callable[[int, str], int | None] = probe,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
+    progress: Callable[[float, str], None] | None = None,
 ) -> None:
-    deadline = clock() + svc.start_timeout_s
+    began = clock()
+    deadline = began + svc.start_timeout_s
     while True:
         code = proc.poll()
         if code is not None:
@@ -127,6 +143,8 @@ def wait_healthy(
                 f"{svc.name} did not answer on port {svc.port}{svc.health} within {svc.start_timeout_s}s. "
                 f"See {log_file}"
             )
+        if progress is not None:
+            progress(clock() - began, last_line(log_file))
         sleep(interval)
 
 
@@ -237,8 +255,12 @@ def run_up(
     out: Callable[[str], None] = _say,
     health_interval: float = 2.0,
     grace: float = 30.0,
+    progress: Callable[[str | None, float, str], None] | None = None,
 ) -> None:
-    """Start every service in order. Blocks (while `hold()` is true, default forever), then stops everything."""
+    """Start every service in order. Blocks (while `hold()` is true, default forever), then stops everything.
+
+    `progress(name, seconds, last_log_line)` is called while a service loads; `progress(None, 0, "")` when it stops.
+    """
     missing = [s.name for s in config.services if not s.command]
     if missing:
         raise RunError(f"these services have no 'command' in the config: {', '.join(missing)}")
@@ -260,7 +282,14 @@ def run_up(
             started.append((svc, proc))
             state["services"][svc.name] = {"pid": proc.pid, "port": svc.port, "health": svc.health, "stop": svc.stop, "command": svc.command, "log": str(file)}
             write_state(log_dir, state)
-            wait_healthy(svc, proc, file, interval=health_interval)
+            try:
+                wait_healthy(
+                    svc, proc, file, interval=health_interval,
+                    progress=(lambda seconds, line, name=svc.name: progress(name, seconds, line)) if progress else None,
+                )
+            finally:
+                if progress:
+                    progress(None, 0.0, "")
             line = f"      {svc.name} is up"
             if before is not None and snapshot:
                 after = snapshot()

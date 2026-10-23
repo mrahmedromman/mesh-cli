@@ -60,12 +60,14 @@ starting things in the right order, and finding which log holds the error is ted
   fails for lack of memory.
 - **Clean shutdown.** One Ctrl+C (or `mesh down`) stops everything in reverse order, tells you as each service
   stops, and ends with a completion message.
+- **Readable in a terminal.** Colour, tables, memory bars, and a live line while a model loads (time and the last
+  log line). When output is piped or `NO_COLOR` is set, it prints plain text.
 - **Just a YAML file.** No daemon, no proxy, nothing listening on a port.
 
 ## Install
 
 A PyPI release is planned. Until then, install from source (use a separate environment from the one that
-runs your models; `mesh` only needs `pydantic` and `pyyaml`):
+runs your models; `mesh` needs only `pydantic`, `pyyaml` and `rich`):
 
 ```bash
 git clone https://github.com/mrahmedromman/mesh-cli.git

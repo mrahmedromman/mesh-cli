@@ -245,3 +245,12 @@ def test_permission_denied_is_reported_not_raised(monkeypatch):
     assert stuck == 1
     assert any("could not stop other-users-service: permission denied" in l for l in lines)
     assert lines[-1] == "1 of 1 service could not be stopped."
+
+
+def test_run_up_reports_progress_for_each_service_and_clears_it(tmp_path):
+    events = []
+    config = Config(services=[http_service("a", free_port(), tmp_path)])
+    runner.run_up(config, tmp_path / "logs", hold=lambda: False, out=lambda _: None, health_interval=0.2, grace=5,
+                  progress=lambda name, seconds, line: events.append(name))
+    assert events[-1] is None
+    assert set(events) <= {"a", None}

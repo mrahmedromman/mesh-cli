@@ -150,6 +150,22 @@ Other lines you may see:
 
 The same messages appear when `mesh up` cleans up after a service fails to start.
 
+## Terminal output
+
+In an interactive terminal, `mesh` draws colour, tables and memory bars, and while a service loads during
+`mesh up` it shows one live line: a spinner, the time so far and the last line of that service's log.
+
+```
+⠹ llm  2:14  Loading safetensors shards 3/8
+```
+
+The line disappears when the service is up and is replaced by `✓ llm is up`. Bars are green below 70% of a
+GPU's memory, yellow up to 90% and red above that.
+
+When output is not a terminal (piped, redirected, run from a script or CI), or when the `NO_COLOR` environment
+variable is set, or `TERM=dumb`, `mesh` prints plain text with no escape codes. The words are the same in both
+modes.
+
 ## Exit codes
 
 | Code | Meaning |
