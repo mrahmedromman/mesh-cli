@@ -100,6 +100,16 @@ def clear_state(log_dir: Path) -> None:
         pass
 
 
+def known_services(log_dir: Path) -> list[str]:
+    """Names of services mesh has started from this log directory: the ones in the state file plus any with a log."""
+    names = set((read_state(log_dir) or {}).get("services", {}))
+    try:
+        names.update(p.stem for p in Path(log_dir).glob("*.log"))
+    except OSError:
+        pass
+    return sorted(names)
+
+
 def running_services(log_dir: Path) -> list[str]:
     state = read_state(log_dir) or {}
     return [name for name, info in state.get("services", {}).items() if group_alive(info["pid"])]

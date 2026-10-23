@@ -3,14 +3,30 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
 
-from . import __version__, holders, runner, ui
+from . import __version__, completion, holders, runner, ui
 from .config import ConfigError, load_config
 from .gpu import GpuError, parse_gpu_query, read_gpus
 from .planner import GpuBudget, Plan, PlanError, make_plan
+from .suggest import did_you_mean
+
+
+class _Parser(argparse.ArgumentParser):
+    """Adds a 'did you mean' to the unknown-command and invalid-value errors."""
+
+    def error(self, message: str):
+        found = re.search(r"invalid choice: '?(.+?)'? \(choose from (.+)\)", message)
+        if found and "maybe you meant" not in message:  # newer Pythons add their own suggestion
+            word = found.group(1)
+            options = [o.strip().strip("'") for o in found.group(2).split(",")]
+            options = [o for o in options if not o.startswith("_")]
+            what = "command" if message.startswith("argument command") else "value"
+            message = f"unknown {what} '{word}'.{did_you_mean(word, options)} Choose from: {', '.join(options)}"
+        super().error(message)
 
 
 def _parse_external(value: str) -> dict[int, int]:
@@ -195,7 +211,13 @@ def _cmd_status(args: argparse.Namespace) -> int:
 def _cmd_logs(args: argparse.Namespace) -> int:
     path = runner.log_path(Path(args.log_dir), args.service)
     if not path.exists():
-        print(f"error: no log file {path}", file=sys.stderr)
+        known = runner.known_services(Path(args.log_dir))
+        if known:
+            print(f"error: no log for service '{args.service}'.{did_you_mean(args.service, known)} "
+                  f"Known services: {', '.join(known)}", file=sys.stderr)
+        else:
+            print(f"error: no log file {path}. Start a stack with 'mesh up', or pass --log-dir if it uses another directory.",
+                  file=sys.stderr)
         return 1
     try:
         with open(path, "r", errors="replace") as handle:
@@ -219,10 +241,21 @@ def _cmd_logs(args: argparse.Namespace) -> int:
         return 0
 
 
+def _cmd_completion(args: argparse.Namespace) -> int:
+    print(completion.script(args.shell, build_parser()), end="")
+    return 0
+
+
+def _cmd_complete(args: argparse.Namespace) -> int:
+    for name in runner.known_services(Path(args.log_dir)):
+        print(name)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="mesh", description="Plan and run multi-service GPU stacks.")
+    parser = _Parser(prog="mesh", description="Plan and run multi-service GPU stacks.")
     parser.add_argument("--version", action="version", version=f"mesh {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=True, metavar="command")
 
     plan = sub.add_parser("plan", help="check whether the services fit on the GPUs, in order")
     plan.add_argument("config", help="path to models.yaml")
@@ -256,6 +289,16 @@ def build_parser() -> argparse.ArgumentParser:
     logs.add_argument("-f", "--follow", action="store_true", help="keep printing new lines until Ctrl+C")
     logs.add_argument("--log-dir", default="logs")
     logs.set_defaults(func=_cmd_logs)
+
+    comp = sub.add_parser("completion", help="print a shell completion script (bash, zsh or fish)")
+    comp.add_argument("shell", choices=completion.SHELLS)
+    comp.set_defaults(func=_cmd_completion)
+
+    # Used by the completion scripts; hidden from --help.
+    hidden = sub.add_parser("_complete")
+    hidden.add_argument("what", choices=["services"])
+    hidden.add_argument("--log-dir", default="logs")
+    hidden.set_defaults(func=_cmd_complete)
     return parser
 
 
