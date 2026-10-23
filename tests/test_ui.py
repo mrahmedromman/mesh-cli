@@ -1,6 +1,5 @@
 """The terminal presentation. Output is captured from a recording console, so no real terminal is needed."""
 
-import os
 import sys
 
 from rich.console import Console
