@@ -6,34 +6,35 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Runs the test suite once per Python version, on a fresh Linux machine each time.
+  # Installs the package and runs the test suite once per Python version, on a fresh Linux machine each time.
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04       # pinned so a change to the "latest" image does not break the build unexpectedly
     strategy:
       fail-fast: false          # keep going if one version fails, so we see all the results
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      # Install the dependencies directly instead of installing mesh-cli itself. pyproject.toml says
-      # Python 3.12+, so `pip install .` would refuse to run on 3.10 and 3.11 before any test ran.
-      # pytest finds the code through `pythonpath = ["src"]` in pyproject.toml.
-      - name: Install test dependencies
-        run: pip install "pydantic>=2.5" "pyyaml>=6" "pytest>=8"
+      - name: Install the package with test tools
+        run: pip install -e ".[dev]"
       - name: Run tests
         run: pytest -q
 
   # Builds the package the way a release would, checks it, installs it and runs the command.
   package:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]   # the oldest and newest supported versions
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Build and check
         run: |
           pip install build twine
