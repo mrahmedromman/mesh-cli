@@ -168,7 +168,7 @@ def _cmd_logs(args: argparse.Namespace) -> int:
         print(f"error: no log file {path}", file=sys.stderr)
         return 1
     try:
-        with open(path, "r", errors="replace") as handle:
+        with open(path, errors="replace") as handle:
             if args.lines is None:  # -n all: the whole file, then (with -f) keep reading from where it ended
                 for chunk in iter(lambda: handle.read(65536), ""):
                     sys.stdout.write(chunk)

@@ -23,6 +23,21 @@ jobs:
       - name: Run tests
         run: pytest -q
 
+  # Style and type checks, once, on the newest Python.
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install the package with dev tools
+        run: pip install -e ".[dev]"
+      - name: Ruff
+        run: ruff check src tests
+      - name: Mypy
+        run: mypy
+
   # Builds the package the way a release would, checks it, installs it and runs the command.
   package:
     runs-on: ubuntu-24.04
@@ -44,3 +59,4 @@ jobs:
         run: |
           pip install dist/*.whl
           mesh --version
+          python -m mesh_cli --version

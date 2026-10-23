@@ -1,0 +1,22 @@
+name: Output from my GPU
+description: Share nvidia-smi output from a GPU other than an RTX 4090 so the planner can be checked against it
+labels: [gpu-data]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Run these with some services running, replace the UUIDs with dummy ones, and paste the output below:
+        `nvidia-smi --query-gpu=index,uuid,name,memory.total,memory.used,memory.free --format=csv`
+        `nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=csv`
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: plan
+    attributes:
+      label: Did `mesh plan` match what you saw?
+      description: If the planned free memory differs from the real numbers, say by how much

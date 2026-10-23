@@ -1,0 +1,37 @@
+name: Bug report
+description: Something did not work as expected
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: mesh version
+      description: Output of `mesh --version`
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, GPU model(s), driver version, and the engine you run (for example vLLM and its version)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The command you ran, the full output, and what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: models.yaml
+      description: Remove private paths and model names first
+      render: yaml
+  - type: textarea
+    id: nvidia-smi
+    attributes:
+      label: nvidia-smi output
+      description: From just before the failure, if you can
+      render: text

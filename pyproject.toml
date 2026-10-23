@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mesh-cli"
-version = "0.1.0.dev0"
+dynamic = ["version"]
 description = "Plan and start multi-service local AI stacks (vLLM, speech-to-text, embeddings) on shared GPUs without OOM surprises."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,6 +16,7 @@ dependencies = ["pydantic>=2.5", "pyyaml>=6"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
+    "Environment :: GPU :: NVIDIA CUDA",
     "Intended Audience :: Developers",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
@@ -23,6 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
     "Topic :: Software Development",
     "Topic :: System :: Systems Administration",
 ]
@@ -30,18 +32,44 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/mrahmedromman/mesh-cli"
 Documentation = "https://github.com/mrahmedromman/mesh-cli/tree/main/docs"
+Changelog = "https://github.com/mrahmedromman/mesh-cli/blob/main/CHANGELOG.md"
 Issues = "https://github.com/mrahmedromman/mesh-cli/issues"
 Source = "https://github.com/mrahmedromman/mesh-cli"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10", "types-PyYAML", "build", "twine"]
 
 [project.scripts]
 mesh = "mesh_cli.cli:main"
 
+[tool.setuptools.dynamic]
+version = { attr = "mesh_cli.__version__" }
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+mesh_cli = ["py.typed"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]  # long lines are left to the author; the formatter is not enforced
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E741"]  # short names like `l` in comprehensions over output lines
+
+[tool.mypy]
+python_version = "3.10"
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+files = ["src"]
