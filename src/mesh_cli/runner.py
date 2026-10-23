@@ -258,7 +258,7 @@ def run_up(
             out(f"[{number}/{total}] starting {svc.name} on port {svc.port}  (log: {file})")
             proc = start_service(svc, log_dir)
             started.append((svc, proc))
-            state["services"][svc.name] = {"pid": proc.pid, "port": svc.port, "health": svc.health, "stop": svc.stop, "log": str(file)}
+            state["services"][svc.name] = {"pid": proc.pid, "port": svc.port, "health": svc.health, "stop": svc.stop, "command": svc.command, "log": str(file)}
             write_state(log_dir, state)
             wait_healthy(svc, proc, file, interval=health_interval)
             line = f"      {svc.name} is up"

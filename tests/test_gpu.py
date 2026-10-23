@@ -17,6 +17,17 @@ def test_parse_real_gpu_query():
     assert gpus[1].uuid == "GPU-00000000-0000-0000-0000-000000000001"
 
 
+def test_parse_utilization_column():
+    gpus = parse_gpu_query((FIXTURES / "gpu_query_util.csv").read_text())
+    assert [g.utilization_pct for g in gpus] == [21, 0]
+    assert gpus[0].free_mib == 892
+
+
+def test_utilization_is_unknown_without_the_column():
+    gpus = parse_gpu_query((FIXTURES / "gpu_query_running.csv").read_text())
+    assert [g.utilization_pct for g in gpus] == [None, None]
+
+
 def test_parse_real_compute_apps():
     apps = parse_compute_apps((FIXTURES / "compute_apps_running.csv").read_text())
     assert len(apps) == 4

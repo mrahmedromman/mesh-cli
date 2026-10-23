@@ -1,0 +1,30 @@
+<?xml version="1.0" ?>
+<!-- Composed from a real nvidia-smi process table (values and layout), written in the `nvidia-smi -q -x`
+     shape. Not captured from the tool itself: replace it with real output from other machines. -->
+<nvidia_smi_log>
+  <driver_version>580.119.02</driver_version>
+  <attached_gpus>2</attached_gpus>
+  <gpu id="00000000:81:00.0">
+    <product_name>NVIDIA GeForce RTX 4090</product_name>
+    <uuid>GPU-00000000-0000-0000-0000-000000000000</uuid>
+    <processes>
+      <process_info><pid>8303</pid><type>G</type><process_name>/usr/lib/xorg/Xorg</process_name><used_memory>110 MiB</used_memory></process_info>
+      <process_info><pid>8728</pid><type>G</type><process_name>/usr/libexec/gnome-remote-desktop-daemon</process_name><used_memory>6 MiB</used_memory></process_info>
+      <process_info><pid>8803</pid><type>G</type><process_name>/usr/bin/gnome-shell</process_name><used_memory>28 MiB</used_memory></process_info>
+      <process_info><pid>9217</pid><type>G</type><process_name>/opt/downloader/downloader</process_name><used_memory>6 MiB</used_memory></process_info>
+      <process_info><pid>11745</pid><type>G</type><process_name>/usr/lib/firefox/firefox</process_name><used_memory>194 MiB</used_memory></process_info>
+      <process_info><pid>191191</pid><type>G</type><process_name>/usr/lib/firefox/firefox-content</process_name><used_memory>73 MiB</used_memory></process_info>
+      <process_info><pid>555362</pid><type>C</type><process_name>VLLM::Worker_TP0</process_name><used_memory>16252 MiB</used_memory></process_info>
+      <process_info><pid>558799</pid><type>C</type><process_name>VLLM::EngineCore</process_name><used_memory>6430 MiB</used_memory></process_info>
+    </processes>
+  </gpu>
+  <gpu id="00000000:82:00.0">
+    <product_name>NVIDIA GeForce RTX 4090</product_name>
+    <uuid>GPU-00000000-0000-0000-0000-000000000001</uuid>
+    <processes>
+      <process_info><pid>8303</pid><type>G</type><process_name>/usr/lib/xorg/Xorg</process_name><used_memory>4 MiB</used_memory></process_info>
+      <process_info><pid>555363</pid><type>C</type><process_name>VLLM::Worker_TP1</process_name><used_memory>16252 MiB</used_memory></process_info>
+      <process_info><pid>562327</pid><type>C</type><process_name>VLLM::EngineCore</process_name><used_memory>3054 MiB</used_memory></process_info>
+    </processes>
+  </gpu>
+</nvidia_smi_log>
