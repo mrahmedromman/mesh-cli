@@ -55,6 +55,9 @@ starting things in the right order, and finding which log holds the error is ted
 - **Any runtime.** A service is a shell command: a venv, a conda environment or `docker run`.
 - **One log per service.** `mesh logs llm -f` follows one; `-n all` prints the whole file.
 - **Reports real memory.** After each start it prints how much GPU memory that service added.
+- **Says who holds the memory.** `mesh gpu` shows each GPU's memory and utilization and names the holder: one of
+  your services, a Docker container, the desktop, or another program. It prints this automatically when a start
+  fails for lack of memory.
 - **Clean shutdown.** One Ctrl+C (or `mesh down`) stops everything in reverse order.
 - **Just a YAML file.** No daemon, no proxy, nothing listening on a port.
 
@@ -135,6 +138,7 @@ planner is most accurate with measured numbers. See [Config](docs/config.md#gett
 | `mesh down` | Stops a stack started by `mesh up`. |
 | `mesh status` | Shows each service's state, process id, port and health. |
 | `mesh logs NAME [-n N\|all] [-f]` | Shows or follows a service's log. |
+| `mesh gpu` | Shows each GPU's memory and utilization, and who is holding the memory. |
 
 All options, `mesh logs` examples, exit codes and where files go: [docs/commands.md](docs/commands.md).
 
@@ -166,7 +170,8 @@ configs you trust. `mesh` itself sends nothing anywhere: it runs `nvidia-smi`, s
 - NVIDIA GPUs and Unix-like systems only. Not tested on Windows, AMD or Intel GPUs.
 - No request proxy or single endpoint; each service keeps its own port.
 - It does not restart a service that crashes after startup; it prints a warning.
-- It does not yet say which process is holding GPU memory when a service fails to start.
+- `mesh gpu` needs Linux and reports a snapshot only: no live view, no per-process utilization, no killing of
+  processes. It recognises Docker containers but not Podman or Kubernetes.
 - Estimates for services nobody has measured are rough.
 - Logs are overwritten on each `mesh up`, with no rotation.
 

@@ -16,6 +16,8 @@ real output from it is worth more than code.
    nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=csv
    ```
 
+   If you can, also run `nvidia-smi -q -x` (it lists graphics processes such as the desktop) and keep only the
+   `<gpu>` blocks with their `<uuid>` and `<processes>`.
 2. Replace the `uuid` values with dummy ones (for example `GPU-00000000-0000-0000-0000-000000000000`).
 3. Open a pull request that adds the output to `tests/fixtures/` and a test in `tests/test_gpu.py` or
    `tests/test_planner.py` that parses it. If the planned memory is wrong for your card, say so in the pull
@@ -52,6 +54,7 @@ seconds.
 |---|---|
 | `src/mesh_cli/config.py` | `models.yaml` loading and validation |
 | `src/mesh_cli/gpu.py` | `nvidia-smi` output parsing |
+| `src/mesh_cli/holders.py` | working out who holds GPU memory (`mesh gpu`) |
 | `src/mesh_cli/planner.py` | the memory simulation |
 | `src/mesh_cli/runner.py` | starting, health-checking, logging and stopping services |
 | `src/mesh_cli/cli.py` | the `mesh` command |
@@ -78,7 +81,7 @@ already do those well. If you are unsure whether an idea fits, open an issue to 
 Ideas that would fit well:
 
 - Support for AMD GPUs (a parser for `rocm-smi`) and other vendors.
-- Reporting which process is holding GPU memory when a service fails to start.
+- Recognising Podman and Kubernetes containers in `mesh gpu`.
 - Checking that other engines (not only vLLM) are planned correctly.
 - Exporting a config for another tool, such as llama-swap.
 

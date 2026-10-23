@@ -8,7 +8,11 @@ import re
 import subprocess
 from dataclasses import dataclass
 
-GPU_QUERY = ["nvidia-smi", "--query-gpu=index,uuid,name,memory.total,memory.used,memory.free", "--format=csv"]
+GPU_QUERY = [
+    "nvidia-smi",
+    "--query-gpu=index,uuid,name,memory.total,memory.used,memory.free,utilization.gpu",
+    "--format=csv",
+]
 
 
 class GpuError(Exception):
@@ -23,6 +27,7 @@ class Gpu:
     total_mib: int
     used_mib: int
     free_mib: int
+    utilization_pct: int | None = None  # None when the saved output has no utilization column
 
     @property
     def reserved_mib(self) -> int:
@@ -56,7 +61,8 @@ def parse_gpu_query(text: str) -> list[Gpu]:
             continue  # header line
         if len(row) < 6:
             raise GpuError(f"unexpected nvidia-smi row: {row}")
-        gpus.append(Gpu(int(row[0]), row[1], row[2], _mib(row[3]), _mib(row[4]), _mib(row[5])))
+        utilization = int(re.search(r"\d+", row[6]).group()) if len(row) > 6 and re.search(r"\d+", row[6]) else None
+        gpus.append(Gpu(int(row[0]), row[1], row[2], _mib(row[3]), _mib(row[4]), _mib(row[5]), utilization))
     if not gpus:
         raise GpuError("no GPUs found in nvidia-smi output")
     return gpus

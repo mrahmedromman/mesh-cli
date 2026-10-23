@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, runner
+from . import __version__, holders, runner
 from .config import ConfigError, load_config
 from .gpu import GpuError, parse_gpu_query, read_gpus
 from .planner import GpuBudget, Plan, PlanError, make_plan
@@ -73,6 +73,29 @@ def _budgets(gpus, external: dict[int, int] | None) -> list[GpuBudget]:
     ]
 
 
+MEMORY_ERRORS = ("free memory on device", "out of memory", "outofmemoryerror")
+
+
+def _looks_like_memory_error(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in MEMORY_ERRORS)
+
+
+def _show_holders(log_dir: Path, title: str, only: set[int] | None = None) -> None:
+    """Print who holds GPU memory. Never raises: this is extra help on top of an error that is already shown."""
+    try:
+        reports = holders.gather(log_dir, only)
+    except (GpuError, OSError) as exc:
+        print(f"\n(could not read which processes hold GPU memory: {exc})")
+        return
+    print(f"\n{title}\n\n{holders.render(reports)}")
+
+
+def _cmd_gpu(args: argparse.Namespace) -> int:
+    print(holders.render(holders.gather(Path(args.log_dir))))
+    return 0
+
+
 def _cmd_plan(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     gpus = parse_gpu_query(Path(args.gpus_csv).read_text()) if args.gpus_csv else read_gpus()
@@ -81,6 +104,8 @@ def _cmd_plan(args: argparse.Namespace) -> int:
     budgets = _budgets(gpus, args.external)
     plan = make_plan(config, budgets)
     print(_render(plan, budgets))
+    if args.external is None and not args.gpus_csv and any(b.external_mib > 0 for b in budgets):
+        _show_holders(Path(args.log_dir), "Memory currently in use, by holder:", {b.index for b in budgets if b.external_mib > 0})
     return 0 if plan.ok else 1
 
 
@@ -103,6 +128,8 @@ def _cmd_up(args: argparse.Namespace) -> int:
         print(_render(plan, budgets))
         if not plan.ok and not args.force:
             print("\nThe plan does not fit. Fix the config, or start anyway with --force.")
+            short = {c.gpu for s in plan.services for c in s.checks if not c.ok}
+            _show_holders(log_dir, "Who is holding memory on the GPUs that are short:", short)
             return 1
         print()
         snapshot = lambda: {g.index: g.used_mib for g in read_gpus()}  # noqa: E731
@@ -110,6 +137,8 @@ def _cmd_up(args: argparse.Namespace) -> int:
         runner.run_up(config, log_dir, snapshot=snapshot)
     except runner.RunError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        if isinstance(exc, runner.ServiceExited) and _looks_like_memory_error(str(exc)):
+            _show_holders(log_dir, "Who is holding GPU memory now (the services mesh started have been stopped):")
         return 1
     return 0
 
@@ -169,7 +198,12 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("config", help="path to models.yaml")
     plan.add_argument("--gpus-csv", help="saved output of: nvidia-smi --query-gpu=index,uuid,name,memory.total,memory.used,memory.free --format=csv")
     plan.add_argument("--external", type=_parse_external, help="memory used by other processes, e.g. 0=417,1=4 (MiB)")
+    plan.add_argument("--log-dir", default="logs", help="where `mesh up` keeps its state (used to recognise your services)")
     plan.set_defaults(func=_cmd_plan)
+
+    gpu = sub.add_parser("gpu", help="show who is holding memory on each GPU")
+    gpu.add_argument("--log-dir", default="logs", help="where `mesh up` keeps its state (used to recognise your services)")
+    gpu.set_defaults(func=_cmd_gpu)
 
     up = sub.add_parser("up", help="plan, then start every service in order with one log file each")
     up.add_argument("config", help="path to models.yaml")

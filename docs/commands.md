@@ -9,6 +9,7 @@ Back to the [README](../README.md) · [Config reference](config.md) · [How it w
 | `mesh down` | Stops a stack started by `mesh up`, in reverse order. |
 | `mesh status` | Shows each service's state, process id, port and health. |
 | `mesh logs NAME` | Shows or follows a service's log. |
+| `mesh gpu` | Shows each GPU's memory and utilization, and who is holding the memory. |
 | `mesh --version` | Prints the version. |
 
 ## Options
@@ -18,7 +19,7 @@ Back to the [README](../README.md) · [Config reference](config.md) · [How it w
 | `--gpus-csv FILE` | `plan` | Read GPUs from saved `nvidia-smi` output instead of running it. Handy for testing and for planning on another machine. |
 | `--external 0=417,1=4` | `plan` | Memory (MiB) already used by other programs on each GPU. Without it, `plan` counts everything currently in use as external and prints a note. |
 | `--force` | `up` | Start even if the plan says a service will not fit. |
-| `--log-dir DIR` | `up`, `down`, `status`, `logs` | Where logs and state live. Default `logs` in the current directory. Use the same value for every command. |
+| `--log-dir DIR` | `up`, `down`, `status`, `logs`, `gpu`, `plan` | Where logs and state live. Default `logs` in the current directory. Use the same value for every command. `gpu` and `plan` read it only to recognise your running services. |
 | `-n N` | `logs` | Show the last `N` lines. Default 50. `-n 0` shows none (useful with `-f` to see only new lines). |
 | `-n all` | `logs` | Show the whole log from the start, without needing to know how many lines it has. |
 | `-f`, `--follow` | `logs` | After printing, keep showing new lines until Ctrl+C. |
@@ -62,6 +63,46 @@ mesh logs llm -f             # the last 50 lines, then follow live
 mesh logs llm -n all -f      # the whole log, then follow live
 mesh logs llm -n 0 -f        # only new lines from now on
 ```
+
+## `mesh gpu`
+
+```bash
+mesh gpu
+```
+
+Prints one block per GPU: total memory, the part the driver reserves, used, free and utilization, then every
+holder of the used memory, largest first:
+
+```
+GPU 0  NVIDIA GeForce RTX 4090  24564 MiB total · 485 reserved · 23187 used · 892 free · 21% utilization
+    16252 MiB  llm          mesh service · 1 process
+     6430 MiB  stt          mesh service · container "stt" · 1 process
+      417 MiB  desktop      graphics apps: Xorg, gnome-shell, firefox · 6 processes
+       88 MiB  unattributed used memory that no listed process accounts for
+```
+
+Each holder is one of:
+
+- **A mesh service**, named as in your config. Docker services are recognised through their container.
+- **A Docker container** that mesh did not start, by name (or the first 12 characters of its id if `docker ps`
+  is not allowed).
+- **desktop**: graphics apps such as the display server and browsers, grouped together.
+- **Another program**, with its user, process id and command line. This is where an orphaned process left behind
+  by a crash shows up.
+- **unattributed**: memory in use that no listed process accounts for (driver overhead, or processes you are not
+  allowed to see).
+
+It only reports; it never stops or signals anything.
+
+The same table is printed for you in three places, only for the GPUs involved:
+
+- when `mesh up` finds the plan does not fit (the GPUs that are short);
+- when a service exits during `mesh up` with a memory error in its log;
+- under `mesh plan`, when it counts memory already in use as external (not with `--gpus-csv`).
+
+Run it on the host, not inside a container: inside a container `nvidia-smi` cannot see the host's GPU processes.
+It needs Linux, because it reads `/proc`. If a process exits while it runs, or a detail is unreadable, that part
+is shown as unknown instead of failing.
 
 ## `mesh status` and `mesh down`
 

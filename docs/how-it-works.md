@@ -59,11 +59,34 @@ Behaviour on other GPUs, drivers and vLLM versions is not yet known. See
 8. On Ctrl+C, SIGTERM, or `mesh down`, it stops services in reverse order: first the service's `stop` command if
    it has one, then SIGTERM to its process group, waiting up to 30 seconds, then SIGKILL.
 
+## How `mesh gpu` finds the owner of GPU memory
+
+`nvidia-smi` lists GPU processes by process id, with names like `VLLM::EngineCore`. Two services can show up with
+the same name, so the name alone does not say whose memory it is. `mesh` works out the owner like this:
+
+1. **Mesh services.** `mesh up` starts each service in its own process group and records it in `state.json`. A
+   GPU process belongs to a service if it is in that group, or if the service's process is one of its ancestors.
+2. **Docker containers.** For a process that is not in a mesh group, `mesh` reads `/proc/<pid>/cgroup`. A
+   Docker container shows up there as `docker-<id>.scope` or `/docker/<id>`. `docker ps` turns the id into a
+   name. If that name appears in a service's `command` or `stop` as `--name NAME` or `docker stop NAME`, the
+   memory is attributed to that service.
+3. **Desktop.** Processes that `nvidia-smi` marks as graphics (type G) are grouped as `desktop`.
+4. **Everything else** is shown with its user, process id and command line.
+5. **Unattributed.** Memory used minus everything listed above.
+
+Processes come from `nvidia-smi --query-compute-apps` (compute processes) and `nvidia-smi -q -x` (which also
+lists graphics processes). If the XML cannot be read, graphics apps are simply not itemised.
+
+Some limits: container matching relies on the container name appearing in your config, as above. Only Docker is
+recognised, not Podman or Kubernetes. The graphics-process parsing was written against the documented XML layout
+and has not yet been checked against real output from many drivers.
+
 ## What it does not do
 
 - It does not proxy requests or give one endpoint for all services. Each service keeps its own port. Tools such
   as llama-swap and LiteLLM already do routing well.
 - It does not swap models on demand. The services you list stay loaded.
 - It does not restart a crashed service.
-- It does not yet report which process is holding GPU memory when a start fails.
+- It does not kill processes. `mesh gpu` only reports who is holding memory.
+- It does not show live, updating utilization or per-process utilization; tools such as nvitop do that well.
 - NVIDIA GPUs only, through `nvidia-smi`. Not tested on Windows.
