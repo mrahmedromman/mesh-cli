@@ -1,0 +1,45 @@
+name: tests
+
+# Run on every push to any branch, and allow starting it by hand from the Actions tab.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  # Runs the test suite once per Python version, on a fresh Linux machine each time.
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # keep going if one version fails, so we see all the results
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # Install the dependencies directly instead of installing mesh-cli itself. pyproject.toml says
+      # Python 3.12+, so `pip install .` would refuse to run on 3.10 and 3.11 before any test ran.
+      # pytest finds the code through `pythonpath = ["src"]` in pyproject.toml.
+      - name: Install test dependencies
+        run: pip install "pydantic>=2.5" "pyyaml>=6" "pytest>=8"
+      - name: Run tests
+        run: pytest -q
+
+  # Builds the package the way a release would, checks it, installs it and runs the command.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and check
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*
+      - name: Install the built wheel and run it
+        run: |
+          pip install dist/*.whl
+          mesh --version
