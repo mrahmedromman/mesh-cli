@@ -1,5 +1,6 @@
 """The terminal presentation. Output is captured from a recording console, so no real terminal is needed."""
 
+import io
 import sys
 
 from rich.console import Console
@@ -115,12 +116,29 @@ def test_startup_display_shows_one_live_line_and_clears_it():
     con = recording()
     display = ui.StartupDisplay(con)
     display.progress("llm", 75, "\x1b[32mLoading safetensors shards 3/8\x1b[0m")
-    assert display._status is not None
+    assert display._thread is not None
     display.progress("llm", 80, "x" * 500)  # a very long log line must not break the line
     display.progress(None, 0, "")
-    assert display._status is None
+    assert display._thread is None
     display.out("      llm is up")
     assert "✓ llm is up" in text_of(con)
+
+
+def test_live_line_fits_the_current_terminal_width_and_is_cleared_with_one_code(monkeypatch):
+    con = Console(file=io.StringIO(), force_terminal=True, width=110, highlight=False)
+    display = ui.StartupDisplay(con)
+    widths = iter([120, 60, 30])
+    monkeypatch.setattr(display, "_width", lambda: next(widths, 30))
+    display._label = ("llm", "0:24", "(EngineCore_DP0 pid=569752) WARNING Reducing Torch parallelism " * 3)
+    for _ in range(3):
+        display._draw()
+    frames = [f for f in con.file.getvalue().split(display.CLEAR) if f]
+    assert len(frames) == 3
+    for frame, width in zip(frames, (120, 60, 30), strict=True):
+        assert len(ui.ANSI.sub("", frame)) < width  # never a full row, so it cannot wrap
+    display._label = None
+    display._erase()
+    assert con.file.getvalue().endswith(display.CLEAR)
 
 
 # --- runner hooks the display relies on -----------------------------------------------------------------------

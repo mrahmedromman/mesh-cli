@@ -10,10 +10,10 @@ from __future__ import annotations
 import os
 import re
 import sys
+import threading
 
 from rich import box
 from rich.console import Console, JustifyMethod
-from rich.status import Status
 from rich.table import Table
 from rich.text import Text
 
@@ -185,31 +185,75 @@ def print_status(rows: list[tuple[str, bool, int, int, str]], con: Console | Non
 
 
 class StartupDisplay:
-    """Prints `mesh up` progress lines and, while a service loads, one live line: spinner, time and last log line."""
+    """Prints `mesh up` progress lines and, while a service loads, one live line: spinner, time and last log line.
+
+    The live line is drawn here, not with rich's live display, because that display erases by counting the rows it
+    drew. If the terminal is narrowed while a service loads, the line wraps and the count is wrong, which leaves
+    stale rows behind. This reads the terminal width again on every frame and clears with one escape code.
+    """
+
+    FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    CLEAR = "\r\x1b[2K"
 
     def __init__(self, con: Console | None = None) -> None:
         self.con = con or console()
-        self._status: Status | None = None
+        self._lock = threading.Lock()
+        self._label: tuple[str, str, str] | None = None
+        self._frame = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
 
     def out(self, line: str) -> None:
-        self.con.print(style_line(line))
+        with self._lock:
+            self._erase()
+            self.con.print(style_line(line))
 
     def progress(self, name: str | None, elapsed: float, last_line: str) -> None:
         if name is None:
             self.close()
             return
         minutes, seconds = divmod(int(elapsed), 60)
-        text = Text.assemble((name, "bold"), f"  {minutes}:{seconds:02d}  ")
-        room = max(self.con.width - len(text.plain) - 4, 10)
         log = ANSI.sub("", last_line).strip()
-        text.append(log if len(log) <= room else log[: room - 1] + "…", style="dim")
-        if self._status is None:
-            self._status = self.con.status(text, spinner="dots")
-            self._status.start()
-        else:
-            self._status.update(text)
+        with self._lock:
+            self._label = (name, f"{minutes}:{seconds:02d}", log)
+            if self._thread is None:
+                self._stop.clear()
+                self._thread = threading.Thread(target=self._animate, daemon=True)
+                self._thread.start()
+            self._draw()
 
     def close(self) -> None:
-        if self._status is not None:
-            self._status.stop()
-            self._status = None
+        thread = self._thread
+        self._stop.set()
+        if thread is not None:
+            thread.join()
+        with self._lock:
+            self._thread = None
+            self._label = None
+            self._erase()
+
+    def _animate(self) -> None:
+        while not self._stop.wait(0.1):
+            with self._lock:
+                self._frame += 1
+                self._draw()
+
+    def _width(self) -> int:
+        try:
+            return os.get_terminal_size(self.con.file.fileno()).columns
+        except (OSError, ValueError):
+            return self.con.width
+
+    def _draw(self) -> None:
+        if self._label is None:
+            return
+        name, clock, log = self._label
+        room = max(self._width() - len(name) - len(clock) - 7, 10)  # one spare column: a full row can wrap early
+        log = log if len(log) <= room else log[: room - 1] + "…"
+        spinner = self.FRAMES[self._frame % len(self.FRAMES)]
+        self.con.file.write(f"{self.CLEAR}\x1b[36m{spinner}\x1b[0m \x1b[1m{name}\x1b[0m  {clock}  \x1b[2m{log}\x1b[0m")
+        self.con.file.flush()
+
+    def _erase(self) -> None:
+        self.con.file.write(self.CLEAR)
+        self.con.file.flush()
