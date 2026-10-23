@@ -1,20 +1,34 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mesh-cli"
-version = "0.0.1"
+version = "0.1.0.dev0"
 description = "Plan and start multi-service local AI stacks (vLLM, speech-to-text, embeddings) on shared GPUs without OOM surprises."
 readme = "README.md"
-requires-python = ">=3.10"
-license = { text = "MIT" }
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "AhmedRomman" }]
+keywords = ["mesh-cli", "vllm", "gpu", "llm", "nvidia", "cli", "self-hosted", "inference", "vram", "local-ai"]
 dependencies = ["pydantic>=2.5", "pyyaml>=6"]
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
     "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+    "Topic :: System :: Systems Administration",
 ]
+
+[project.urls]
+Homepage = "https://github.com/mrahmedromman/mesh-cli"
+Documentation = "https://github.com/mrahmedromman/mesh-cli/tree/main/docs"
+Issues = "https://github.com/mrahmedromman/mesh-cli/issues"
+Source = "https://github.com/mrahmedromman/mesh-cli"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
