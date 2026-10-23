@@ -7,7 +7,7 @@ name = "mesh-cli"
 version = "0.1.0.dev0"
 description = "Plan and start multi-service local AI stacks (vLLM, speech-to-text, embeddings) on shared GPUs without OOM surprises."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "AhmedRomman" }]
@@ -19,7 +19,10 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development",
     "Topic :: System :: Systems Administration",
 ]
