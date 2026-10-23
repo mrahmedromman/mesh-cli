@@ -1,0 +1,92 @@
+# Commands
+
+Back to the [README](../README.md) · [Config reference](config.md) · [How it works](how-it-works.md)
+
+| Command | What it does |
+|---|---|
+| `mesh plan CONFIG` | Simulates starting the services in order and reports which ones fit. Changes nothing. |
+| `mesh up CONFIG` | Runs the plan, then starts each service, waits for its health check, and prints the memory it added. Blocks until Ctrl+C. |
+| `mesh down` | Stops a stack started by `mesh up`, in reverse order. |
+| `mesh status` | Shows each service's state, process id, port and health. |
+| `mesh logs NAME` | Shows or follows a service's log. |
+| `mesh --version` | Prints the version. |
+
+## Options
+
+| Option | Applies to | Meaning |
+|---|---|---|
+| `--gpus-csv FILE` | `plan` | Read GPUs from saved `nvidia-smi` output instead of running it. Handy for testing and for planning on another machine. |
+| `--external 0=417,1=4` | `plan` | Memory (MiB) already used by other programs on each GPU. Without it, `plan` counts everything currently in use as external and prints a note. |
+| `--force` | `up` | Start even if the plan says a service will not fit. |
+| `--log-dir DIR` | `up`, `down`, `status`, `logs` | Where logs and state live. Default `logs` in the current directory. Use the same value for every command. |
+| `-n N` | `logs` | Show the last `N` lines. Default 50. `-n 0` shows none (useful with `-f` to see only new lines). |
+| `-n all` | `logs` | Show the whole log from the start, without needing to know how many lines it has. |
+| `-f`, `--follow` | `logs` | After printing, keep showing new lines until Ctrl+C. |
+
+`-n` needs a value (a number or `all`); a bare `-n` is an error.
+
+## `mesh plan`
+
+```bash
+mesh plan models.yaml
+mesh plan models.yaml --gpus-csv gpus.csv --external 0=417,1=4
+```
+
+Prints each GPU, then each service in order with what it needs and what is free, then the memory left on
+each GPU after everything starts. When a service will not fit, it suggests a smaller
+`--gpu-memory-utilization`. It warns if a GPU ends up with less free memory than `margin_mib`.
+
+To make a `--gpus-csv` file:
+
+```bash
+nvidia-smi --query-gpu=index,uuid,name,memory.total,memory.used,memory.free --format=csv > gpus.csv
+```
+
+## `mesh up`
+
+```bash
+mesh up models.yaml
+mesh up models.yaml --force
+```
+
+See [How it works](how-it-works.md#what-mesh-up-does) for the exact steps. In short: plan, start each service
+in order, wait for its health check, report the memory it added, and stop everything on Ctrl+C.
+
+## `mesh logs`
+
+```bash
+mesh logs llm                # the last 50 lines, then exit
+mesh logs llm -n 200         # the last 200 lines, then exit
+mesh logs llm -n all         # the whole log, then exit
+mesh logs llm -f             # the last 50 lines, then follow live
+mesh logs llm -n all -f      # the whole log, then follow live
+mesh logs llm -n 0 -f        # only new lines from now on
+```
+
+## `mesh status` and `mesh down`
+
+`mesh status` prints one line per service: `running` or `stopped`, the process id, the port, and the HTTP
+status from its health path (or `not answering`).
+
+`mesh down`, run from another terminal, asks the `mesh up` process to shut down gracefully, so the result is the
+same as pressing Ctrl+C there. If that process is gone, it stops each recorded service itself.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | `plan`: a service will not fit. `up`: the plan does not fit (without `--force`), a service failed to start, or a stack is already running. `logs`: no such log file. |
+| 2 | Bad config, unreadable `nvidia-smi` output, or a bad command line. |
+
+## Where files go
+
+Everything `mesh up` writes goes in the log directory (default `logs/` in the **current directory**):
+
+- `logs/NAME.log`: one file per service, with stdout and stderr together. Each `mesh up` starts the file
+  fresh, so a new run overwrites the previous log. Copy a log you want to keep.
+- `logs/state.json`: which services are running, their process ids and ports. `mesh status`, `mesh down` and
+  `mesh logs` read it, which is why they must be run from the same directory (or with the same `--log-dir`).
+  It is removed when the stack stops.
+
+Add `logs/` to your `.gitignore`.

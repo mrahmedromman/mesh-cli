@@ -1,0 +1,91 @@
+# models.yaml reference
+
+Back to the [README](../README.md) · [Commands](commands.md) · [How it works](how-it-works.md)
+
+Two complete examples: [examples/single-gpu.yaml](../examples/single-gpu.yaml) (a chat model and an embedding
+model on one card) and [examples/dual-gpu.yaml](../examples/dual-gpu.yaml) (four services on two cards).
+
+```yaml
+margin_mib: 1024              # optional, top level
+
+services:
+  - name: chat
+    port: 8001
+    gpus: [0]
+    gpu_memory_utilization: 0.55
+    overhead_mib: 1500
+    health: /v1/models
+    command: |
+      source ~/venvs/vllm/bin/activate
+      exec vllm serve /path/to/model --port 8001 --gpu-memory-utilization 0.55
+```
+
+Unknown fields are rejected with the field name, so a typo such as `gpu_mem_util` is reported instead of
+silently ignored. Service names and ports must be unique.
+
+## Service fields
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | yes | Used in output, log file names (`logs/NAME.log`) and `mesh logs NAME`. |
+| `port` | yes | Port polled for the health check. Must be unique across services. |
+| `gpus` | yes | List of GPU indexes the service uses, as `nvidia-smi` numbers them. |
+| `command` | for `up` | Shell snippet run with `bash -c`. See [Writing a command](#writing-a-command). Not needed for `plan`. |
+| `stop` | no | Command run first when stopping, e.g. `docker stop NAME`. Recommended for Docker services. |
+| `runtime` | no | `command` (default) or `docker`. A label for now; both are started through `command`. |
+| `gpu_memory_utilization` | no | vLLM-style fraction (above 0, up to 1) of each GPU. Used to check the service can start. |
+| `measured_mib` | no | Memory the service really held on each GPU, e.g. `{0: 16252, 1: 16252}`. The best source of truth. |
+| `overhead_mib` | no | Extra memory beyond the fraction, used only for a GPU with no `measured_mib`. Default 0. |
+| `health` | no | Path polled until the service answers. Default `/v1/models`. Any HTTP response counts as alive. |
+| `start_timeout_s` | no | Seconds to wait for the health check. Default 900. |
+
+`measured_mib` may only list GPUs that are in `gpus`.
+
+A service needs either `gpu_memory_utilization` or `measured_mib` to be planned. With neither, `mesh plan`
+counts its memory as 0 and says so.
+
+## Top-level fields
+
+| Field | Meaning |
+|---|---|
+| `services` | The list of services, in the order they should start. At least one. |
+| `margin_mib` | Free memory that should remain on each GPU after everything starts. Default 1024. `plan` warns below it. |
+
+## Getting real numbers for `measured_mib`
+
+1. Start with `gpu_memory_utilization` and a guess for `overhead_mib` (1500 is a reasonable first guess for a
+   vLLM service; it came from one machine, so treat it as a guess).
+2. Run `mesh up`. After each service is healthy it prints `memory it added: GPU 0: ~16260 MiB`.
+3. Put those numbers in `measured_mib` and delete `overhead_mib`.
+
+The printed figure is the change in memory used while that service started, so it is slightly off if something
+else was using the GPU at the same moment.
+
+## Writing a command
+
+`command` is run as `bash -c <command>`, in its own process group, with output written to `logs/NAME.log`.
+
+- **End with `exec`.** `exec vllm serve ...` replaces the shell with the program, so Ctrl+C and `mesh down`
+  reach the real process.
+- **Activate environments on the first lines**: `source ~/venvs/vllm/bin/activate` or `conda activate my-env`.
+  For conda you may need `source ~/miniconda3/etc/profile.d/conda.sh` before `conda activate`.
+- **Docker services:** use `exec docker run --rm --name NAME ...` and add `stop: docker stop NAME`.
+- **Multi-line commands** work with a YAML block (`command: |`); lines ending in `\` continue as in a shell.
+
+### Choosing GPUs for a container
+
+`--gpus '"device=1"'` shows the container only GPU 1, which becomes device 0 inside it. **Do not also set
+`CUDA_VISIBLE_DEVICES=1`** in that container: it hides the only GPU, and many programs then silently run on
+the CPU. You can check with:
+
+```bash
+docker exec NAME python -c "import torch; print(torch.cuda.is_available(), torch.cuda.device_count())"
+```
+
+It should print `True 1`.
+
+## Health paths
+
+A service counts as started when its `health` path returns any HTTP response (200, 404 and 405 all count),
+because that proves the server is listening. Use `/v1/models` for OpenAI-compatible servers and `/docs` for
+FastAPI apps. If a service only answers on a different route, set `health` to that route.

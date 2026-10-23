@@ -23,6 +23,15 @@ def _parse_external(value: str) -> dict[int, int]:
     return result
 
 
+def _line_count(value: str) -> int | None:
+    """`-n all` means the whole file (None); otherwise a number of lines, 0 or more."""
+    if value.lower() == "all":
+        return None
+    if not value.isdigit():
+        raise argparse.ArgumentTypeError(f"expected a number of lines or 'all', got {value!r}")
+    return int(value)
+
+
 def _render(plan: Plan, budgets: list[GpuBudget]) -> str:
     lines = [f"Plan for {len(plan.services)} services on {len(budgets)} GPUs", ""]
     for b in budgets:
@@ -129,12 +138,17 @@ def _cmd_logs(args: argparse.Namespace) -> int:
     if not path.exists():
         print(f"error: no log file {path}", file=sys.stderr)
         return 1
-    sys.stdout.write(runner.tail_lines(path, args.lines))
-    if not args.follow:
-        return 0
     try:
         with open(path, "r", errors="replace") as handle:
-            handle.seek(0, 2)
+            if args.lines is None:  # -n all: the whole file, then (with -f) keep reading from where it ended
+                for chunk in iter(lambda: handle.read(65536), ""):
+                    sys.stdout.write(chunk)
+            else:
+                sys.stdout.write(runner.tail_lines(path, args.lines))
+                handle.seek(0, 2)
+            sys.stdout.flush()
+            if not args.follow:
+                return 0
             while True:
                 chunk = handle.read()
                 if chunk:
@@ -173,8 +187,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     logs = sub.add_parser("logs", help="show a service's log")
     logs.add_argument("service")
-    logs.add_argument("-n", "--lines", type=int, default=50)
-    logs.add_argument("-f", "--follow", action="store_true")
+    logs.add_argument("-n", "--lines", type=_line_count, default=50, metavar="N|all",
+                      help="how many of the last lines to show (default 50), or 'all' for the whole log")
+    logs.add_argument("-f", "--follow", action="store_true", help="keep printing new lines until Ctrl+C")
     logs.add_argument("--log-dir", default="logs")
     logs.set_defaults(func=_cmd_logs)
     return parser

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from mesh_cli.cli import main
 
 FIXTURE = str(Path(__file__).parent / "fixtures" / "gpu_query_running.csv")
@@ -39,6 +41,34 @@ def test_logs_prints_the_tail(tmp_path, capsys):
     (tmp_path / "llm.log").write_text("".join(f"line {i}\n" for i in range(100)))
     assert main(["logs", "llm", "-n", "3", "--log-dir", str(tmp_path)]) == 0
     assert capsys.readouterr().out == "line 97\nline 98\nline 99\n"
+
+
+def test_logs_default_is_the_last_50_lines(tmp_path, capsys):
+    (tmp_path / "llm.log").write_text("".join(f"line {i}\n" for i in range(100)))
+    assert main(["logs", "llm", "--log-dir", str(tmp_path)]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "line 50" and out[-1] == "line 99" and len(out) == 50
+
+
+def test_logs_n_all_prints_the_whole_file(tmp_path, capsys):
+    text = "".join(f"line {i}\n" for i in range(200_000))  # larger than one read chunk
+    (tmp_path / "llm.log").write_text(text)
+    assert main(["logs", "llm", "-n", "all", "--log-dir", str(tmp_path)]) == 0
+    assert capsys.readouterr().out == text
+
+
+def test_logs_n_zero_prints_nothing(tmp_path, capsys):
+    (tmp_path / "llm.log").write_text("a\nb\n")
+    assert main(["logs", "llm", "-n", "0", "--log-dir", str(tmp_path)]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_logs_n_rejects_other_words(tmp_path, capsys):
+    (tmp_path / "llm.log").write_text("a\n")
+    with pytest.raises(SystemExit) as excinfo:
+        main(["logs", "llm", "-n", "lots", "--log-dir", str(tmp_path)])
+    assert excinfo.value.code == 2
+    assert "number of lines or 'all'" in capsys.readouterr().err
 
 
 def test_logs_for_unknown_service(tmp_path, capsys):
