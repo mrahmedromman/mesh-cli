@@ -57,7 +57,9 @@ Behaviour on other GPUs, drivers and vLLM versions is not yet known. See
 7. When all are up it waits. If a service dies later, it prints a warning with the log path and leaves the
    others running; it does not restart it.
 8. On Ctrl+C, SIGTERM, or `mesh down`, it stops services in reverse order: first the service's `stop` command if
-   it has one, then SIGTERM to its process group, waiting up to 30 seconds, then SIGKILL.
+   it has one, then SIGTERM to its process group, waiting up to 30 seconds, then SIGKILL. It prints a line as
+   each service stops and a final "All N services stopped." (see
+   [Shutdown messages](commands.md#shutdown-messages)).
 
 ## What it does not do
 
