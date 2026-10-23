@@ -71,6 +71,44 @@ status from its health path (or `not answering`).
 `mesh down`, run from another terminal, asks the `mesh up` process to shut down gracefully, so the result is the
 same as pressing Ctrl+C there. If that process is gone, it stops each recorded service itself.
 
+### Shutdown messages
+
+Stopping prints progress, one service at a time in reverse start order, and ends with a completion line. This is
+what you see in the `mesh up` terminal after Ctrl+C:
+
+```
+Stopping 3 services...
+  stopping tts ...
+  stopped tts
+  stopping stt ...
+  stopped stt
+  stopping llm ...
+  stopped llm
+All 3 services stopped.
+```
+
+`mesh down` prints its own progress in the terminal where you run it:
+
+```
+Asking mesh up (pid 44233) to stop 3 services...
+  stopped tts
+  stopped stt
+  stopped llm
+All 3 services stopped.
+```
+
+Other lines you may see:
+
+- `stopped llm (12s)`: a service that took a second or more to stop shows how long it took.
+- `stopped llm (force-killed after 30s)`: the service ignored the polite stop request for the full 30 seconds, so
+  it was killed.
+- `tts was already stopped`: the process had exited before shutdown started.
+- `could not stop tts: permission denied ...`: the process belongs to another user. The last line then reads
+  `1 of 3 services could not be stopped.`
+- If `mesh up` does not finish within 90 seconds, `mesh down` says so and stops the remaining services itself.
+
+The same messages appear when `mesh up` cleans up after a service fails to start.
+
 ## Exit codes
 
 | Code | Meaning |

@@ -130,7 +130,22 @@ def wait_healthy(
         sleep(interval)
 
 
-def stop_process(pid: int, stop_command: str | None = None, grace: float = 30.0, proc: subprocess.Popen | None = None) -> None:
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def stop_process(pid: int, stop_command: str | None = None, grace: float = 30.0, proc: subprocess.Popen | None = None) -> str:
+    """Stop a service's process group.
+
+    Returns "gone" (it was already stopped), "stopped", "killed" (SIGKILL was needed) or "denied" (the process
+    belongs to another user and could not be signalled).
+    """
     if stop_command:
         try:
             subprocess.run(["bash", "-c", stop_command], capture_output=True, timeout=60)
@@ -143,23 +158,67 @@ def stop_process(pid: int, stop_command: str | None = None, grace: float = 30.0,
         return not group_alive(pid)
 
     if gone():
-        return
+        return "gone"
     try:
         os.killpg(pid, signal.SIGTERM)
     except ProcessLookupError:
-        return
+        return "gone"
+    except PermissionError:
+        return "denied"
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline:
         if gone():
-            return
+            return "stopped"
         time.sleep(0.2)
     try:
         os.killpg(pid, signal.SIGKILL)
     except ProcessLookupError:
-        return
+        return "stopped"
+    except PermissionError:
+        return "denied"
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline and not gone():
         time.sleep(0.1)
+    return "killed"
+
+
+def _count(total: int) -> str:
+    return f"{total} service{'' if total == 1 else 's'}"
+
+
+def _all_stopped(total: int) -> str:
+    return "All services stopped." if total == 1 else f"All {total} services stopped."
+
+
+def stop_all(
+    entries: list[tuple[str, int, str | None, subprocess.Popen | None]],
+    grace: float,
+    out: Callable[[str], None],
+) -> int:
+    """Stop services in the order given, printing progress. Returns how many are still running afterwards."""
+    total = len(entries)
+    out(f"Stopping {_count(total)}...")
+    stuck = 0
+    for name, pid, stop_command, proc in entries:
+        out(f"  stopping {name} ...")
+        began = time.monotonic()
+        result = stop_process(pid, stop_command, grace, proc)
+        seconds = time.monotonic() - began
+        if result == "gone":
+            out(f"  {name} was already stopped")
+        elif result == "killed":
+            out(f"  stopped {name} (force-killed after {grace:g}s)")
+        elif result == "denied":
+            out(f"  could not stop {name}: permission denied (pid {pid} belongs to another user?)")
+        else:
+            out(f"  stopped {name}" + (f" ({seconds:.0f}s)" if seconds >= 1 else ""))
+        if result == "denied":
+            stuck += 1
+        elif group_alive(pid):
+            stuck += 1
+            out(f"  warning: {name} is still running (pid {pid})")
+    out(f"{stuck} of {_count(total)} could not be stopped." if stuck else _all_stopped(total))
+    return stuck
 
 
 def _on_sigterm(signum, frame):  # noqa: ARG001
@@ -218,33 +277,50 @@ def run_up(
                     reported.add(svc.name)
                     out(f"warning: {svc.name} exited with status {proc.returncode}; see {log_path(log_dir, svc.name)}")
     except KeyboardInterrupt:
-        out("\nStopping all services...")
+        out("")  # Ctrl+C leaves the cursor after "^C"
     finally:
         if previous_handler is not None:
             signal.signal(signal.SIGTERM, previous_handler)
-        for svc, proc in reversed(started):
-            stop_process(proc.pid, svc.stop, grace, proc)
+        if started:
+            stop_all([(svc.name, proc.pid, svc.stop, proc) for svc, proc in reversed(started)], grace, out)
         clear_state(log_dir)
 
 
-def stop_from_state(log_dir: Path, out: Callable[[str], None] = print, wait: float = 90.0) -> bool:
+def stop_from_state(
+    log_dir: Path,
+    out: Callable[[str], None] = _say,
+    wait: float = 90.0,
+    poll: float = 0.5,
+    grace: float = 30.0,
+) -> bool:
     """`mesh down`: stop a stack started by another `mesh up` process. Returns False if nothing was running."""
     state = read_state(log_dir)
     if not state:
         return False
+    services = list(state.get("services", {}).items())  # in start order
     controller = state.get("controller_pid")
-    if controller and controller != os.getpid():
+    if controller and controller != os.getpid() and pid_alive(controller):
+        out(f"Asking mesh up (pid {controller}) to stop {_count(len(services))}...")
         try:
             os.kill(controller, signal.SIGTERM)  # let `mesh up` shut down gracefully and clear the state
-            deadline = time.monotonic() + wait
-            while time.monotonic() < deadline:
-                if read_state(log_dir) is None:
-                    return True
-                time.sleep(0.5)
         except ProcessLookupError:
             pass
-    for name, info in reversed(list(state.get("services", {}).items())):
-        out(f"stopping {name}")
-        stop_process(info["pid"], info.get("stop"))
+        else:
+            remaining = [name for name, _ in reversed(services)]
+            pids = {name: info["pid"] for name, info in services}
+            deadline = time.monotonic() + wait
+            while time.monotonic() < deadline:
+                finished = read_state(log_dir) is None
+                for name in list(remaining):  # report each service as it disappears (they stop in reverse order)
+                    if finished or not group_alive(pids[name]):
+                        out(f"  stopped {name}")
+                        remaining.remove(name)
+                if finished:
+                    out(_all_stopped(len(services)))
+                    return True
+                time.sleep(poll)
+            out("mesh up did not finish in time; stopping the remaining services directly.")
+            services = [(name, info) for name, info in services if name in remaining]
+    stop_all([(name, info["pid"], info.get("stop"), None) for name, info in reversed(services)], grace, out)
     clear_state(log_dir)
     return True

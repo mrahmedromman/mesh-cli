@@ -55,7 +55,8 @@ starting things in the right order, and finding which log holds the error is ted
 - **Any runtime.** A service is a shell command: a venv, a conda environment or `docker run`.
 - **One log per service.** `mesh logs llm -f` follows one; `-n all` prints the whole file.
 - **Reports real memory.** After each start it prints how much GPU memory that service added.
-- **Clean shutdown.** One Ctrl+C (or `mesh down`) stops everything in reverse order.
+- **Clean shutdown.** One Ctrl+C (or `mesh down`) stops everything in reverse order, tells you as each service
+  stops, and ends with a completion message.
 - **Just a YAML file.** No daemon, no proxy, nothing listening on a port.
 
 ## Install

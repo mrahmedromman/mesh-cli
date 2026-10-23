@@ -3,6 +3,7 @@
 import os
 import socket
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -91,3 +92,156 @@ def test_snapshot_reports_memory_added(tmp_path):
     runner.run_up(config, tmp_path / "logs", snapshot=lambda: next(readings), hold=lambda: False,
                   out=lines.append, health_interval=0.2, grace=5)
     assert any("GPU 0: ~2400 MiB" in l for l in lines)
+
+
+# --- shutdown progress messages -------------------------------------------------------------------------------
+
+
+def test_up_prints_progress_while_stopping_in_reverse_order(tmp_path):
+    a, b = free_port(), free_port()
+    config = Config(services=[http_service("a", a, tmp_path), http_service("b", b, tmp_path)])
+    lines = []
+    runner.run_up(config, tmp_path / "logs", hold=lambda: False, out=lines.append, health_interval=0.2, grace=5)
+    stopping = lines[lines.index("Stopping 2 services..."):]
+    assert [l.strip().split(" (")[0] for l in stopping] == [
+        "Stopping 2 services...",
+        "stopping b ...",
+        "stopped b",
+        "stopping a ...",
+        "stopped a",
+        "All 2 services stopped.",
+    ]
+
+
+def test_single_service_completion_message(tmp_path):
+    config = Config(services=[http_service("only", free_port(), tmp_path)])
+    lines = []
+    runner.run_up(config, tmp_path / "logs", hold=lambda: False, out=lines.append, health_interval=0.2, grace=5)
+    assert "Stopping 1 service..." in lines and lines[-1] == "All services stopped."
+
+
+def test_failed_start_also_reports_the_cleanup(tmp_path):
+    bad = Service(name="bad", port=free_port(), gpus=[0], command="exit 3", start_timeout_s=30)
+    config = Config(services=[http_service("a", free_port(), tmp_path), bad])
+    lines = []
+    with pytest.raises(runner.ServiceExited):
+        runner.run_up(config, tmp_path / "logs", out=lines.append, health_interval=0.2, grace=5)
+    assert "  stopped a" in lines and lines[-1].startswith("All 2 services stopped")
+
+
+def start_group(command):
+    import subprocess
+
+    return subprocess.Popen(["bash", "-c", command], start_new_session=True,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def test_stop_process_results(tmp_path):
+    done = start_group("true")
+    done.wait()
+    assert runner.stop_process(done.pid, grace=1, proc=done) == "gone"
+
+    polite = start_group("exec sleep 60")
+    assert runner.stop_process(polite.pid, grace=5, proc=polite) == "stopped"
+
+    stubborn = start_group("trap '' TERM; exec sleep 60")  # ignores SIGTERM, so it needs SIGKILL
+    import time
+
+    time.sleep(0.3)
+    assert runner.stop_process(stubborn.pid, grace=1, proc=stubborn) == "killed"
+
+
+def test_stop_all_says_when_a_service_was_force_killed_or_already_gone(tmp_path):
+    gone = start_group("true")
+    gone.wait()
+    stubborn = start_group("trap '' TERM; exec sleep 60")
+    import time
+
+    time.sleep(0.3)
+    lines = []
+    stuck = runner.stop_all([("old", gone.pid, None, gone), ("stubborn", stubborn.pid, None, stubborn)], 1, lines.append)
+    assert stuck == 0
+    assert "  old was already stopped" in lines
+    assert "  stopped stubborn (force-killed after 1s)" in lines
+    assert lines[-1] == "All 2 services stopped."
+
+
+def test_down_without_a_running_mesh_up_stops_each_service_with_progress(tmp_path):
+    import subprocess
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    dead_controller = subprocess.Popen(["true"])
+    dead_controller.wait()
+    first, second = start_group("exec sleep 60"), start_group("exec sleep 60")
+    import threading
+
+    for child in (first, second):  # in real use these are orphans that init reaps; here the test must do it
+        threading.Thread(target=child.wait, daemon=True).start()
+    runner.write_state(log_dir, {
+        "controller_pid": dead_controller.pid,
+        "services": {"one": {"pid": first.pid}, "two": {"pid": second.pid}},
+    })
+    lines = []
+    assert runner.stop_from_state(log_dir, out=lines.append, grace=5) is True
+    assert [l.strip() for l in lines if "stopping" in l] == ["stopping two ...", "stopping one ..."]
+    assert lines[-1] == "All 2 services stopped."
+    assert runner.read_state(log_dir) is None
+    assert not runner.group_alive(first.pid) and not runner.group_alive(second.pid)
+
+
+def test_down_asks_a_running_mesh_up_to_stop_and_reports_each_service(tmp_path):
+    import os
+    import subprocess
+    import time
+
+    a, b = free_port(), free_port()
+    cfg = tmp_path / "models.yaml"
+    cfg.write_text(
+        "services:\n"
+        f"  - {{name: a, port: {a}, gpus: [0], health: /, command: 'exec {sys.executable} -m http.server {a} --bind 127.0.0.1 --directory {tmp_path}'}}\n"
+        f"  - {{name: b, port: {b}, gpus: [0], health: /, command: 'exec {sys.executable} -m http.server {b} --bind 127.0.0.1 --directory {tmp_path}'}}\n"
+    )
+    log_dir = tmp_path / "logs"
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    up = subprocess.Popen(
+        [sys.executable, "-m", "mesh_cli.cli", "up", str(cfg), "--log-dir", str(log_dir)],
+        env={**os.environ, "PYTHONPATH": src}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not (runner.probe(a, "/") and runner.probe(b, "/")):
+            time.sleep(0.2)
+        assert runner.probe(a, "/") == 200 and runner.probe(b, "/") == 200
+        lines = []
+        assert runner.stop_from_state(log_dir, out=lines.append, poll=0.1) is True
+        assert up.wait(timeout=30) == 0
+    finally:
+        if up.poll() is None:
+            up.kill()
+    assert lines[0].startswith("Asking mesh up (pid ") and lines[0].endswith("to stop 2 services...")
+    assert [l for l in lines if l.startswith("  stopped")] == ["  stopped b", "  stopped a"]
+    assert lines[-1] == "All 2 services stopped."
+    output = up.stdout.read()
+    assert "Stopping 2 services..." in output and "All 2 services stopped." in output
+    assert runner.probe(a, "/") is None and runner.probe(b, "/") is None
+
+
+def test_permission_denied_is_reported_not_raised(monkeypatch):
+    child = start_group("exec sleep 60")
+    real_killpg = os.killpg
+
+    def deny(pid, sig):
+        if sig == 0:
+            return real_killpg(pid, sig)
+        raise PermissionError
+
+    monkeypatch.setattr(runner.os, "killpg", deny)
+    lines = []
+    stuck = runner.stop_all([("other-users-service", child.pid, None, None)], 1, lines.append)
+    monkeypatch.undo()
+    real_killpg(child.pid, 9)
+    child.wait()
+    assert stuck == 1
+    assert any("could not stop other-users-service: permission denied" in l for l in lines)
+    assert lines[-1] == "1 of 1 service could not be stopped."
