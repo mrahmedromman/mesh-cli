@@ -13,7 +13,7 @@ import subprocess
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from . import runner
 from .gpu import Gpu, GpuError, parse_compute_apps, read_gpus
@@ -230,7 +230,7 @@ def attribute(
     leaders = {info.pid: name for name, info in services.items()}
     reports = []
     for gpu in gpus:
-        groups: dict[tuple, list] = {}  # owner key -> [label, detail, mib, pids, names]
+        groups: dict[tuple[Any, ...], list] = {}  # owner key -> [label, detail, mib, pids, names]
         for p in (p for p in processes if p.gpu_uuid == gpu.uuid):
             service = _service_of_pid(p.pid, leaders, proc)
             cid = container_id(proc.cgroup(p.pid))
@@ -240,6 +240,7 @@ def attribute(
                     (n for n, info in services.items() if mentions_container(f"{info.command}\n{info.stop}", cname)),
                     None,
                 )
+            key: tuple[Any, ...]
             if service is not None:
                 key, kind, label = ("mesh", service), "mesh", service
                 extra = f' · container "{cname}"' if cname else ""

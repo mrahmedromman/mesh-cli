@@ -83,6 +83,8 @@ def make_plan(config: Config, gpus: list[GpuBudget]) -> Plan:
         notes: list[str] = []
         suggestion: float | None = None
         for gi in svc.gpus:
+            needed: int | None
+            footprint: int | None
             total = by_index[gi].usable_mib
             measured = (svc.measured_mib or {}).get(gi)
             if svc.gpu_memory_utilization is not None:

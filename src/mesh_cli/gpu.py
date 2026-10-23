@@ -61,7 +61,8 @@ def parse_gpu_query(text: str) -> list[Gpu]:
             continue  # header line
         if len(row) < 6:
             raise GpuError(f"unexpected nvidia-smi row: {row}")
-        utilization = int(re.search(r"\d+", row[6]).group()) if len(row) > 6 and re.search(r"\d+", row[6]) else None
+        found = re.search(r"\d+", row[6]) if len(row) > 6 else None
+        utilization = int(found.group()) if found else None
         gpus.append(Gpu(int(row[0]), row[1], row[2], _mib(row[3]), _mib(row[4]), _mib(row[5]), utilization))
     if not gpus:
         raise GpuError("no GPUs found in nvidia-smi output")

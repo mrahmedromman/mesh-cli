@@ -11,6 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from .suggest import did_you_mean
 
 
+def _duplicates(values: list[str] | list[int]) -> list[str | int]:
+    return sorted({v for v in values if values.count(v) > 1}, key=str)  # type: ignore[arg-type]
+
+
 class ConfigError(Exception):
     pass
 
@@ -36,7 +40,7 @@ class Service(BaseModel):
     start_timeout_s: int = Field(default=900, gt=0)
 
     @model_validator(mode="after")
-    def _measured_gpus_are_used(self) -> "Service":
+    def _measured_gpus_are_used(self) -> Service:
         if self.measured_mib:
             extra = set(self.measured_mib) - set(self.gpus)
             if extra:
@@ -52,11 +56,10 @@ class Config(BaseModel):
     margin_mib: int = Field(default=1024, ge=0)
 
     @model_validator(mode="after")
-    def _unique_names_and_ports(self) -> "Config":
+    def _unique_names_and_ports(self) -> Config:
         names = [s.name for s in self.services]
         ports = [s.port for s in self.services]
-        for label, values in (("name", names), ("port", ports)):
-            dupes = sorted({v for v in values if values.count(v) > 1}, key=str)
+        for label, dupes in (("name", _duplicates(names)), ("port", _duplicates(ports))):
             if dupes:
                 raise ValueError(f"duplicate service {label}: {dupes}")
         return self

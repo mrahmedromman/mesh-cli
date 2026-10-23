@@ -45,6 +45,13 @@ pip install -e ".[dev]"
 pytest
 ```
 
+Before opening a pull request, also run the style and type checks that CI runs:
+
+```bash
+ruff check src tests
+mypy
+```
+
 The tests need no GPU and no model. Runner tests start throwaway `http.server` processes, so they take a few
 seconds.
 
@@ -68,7 +75,8 @@ seconds.
 
 - **Keep them small** and about one thing.
 - **Add or update a test** for any behaviour change. A bug fix should come with a test that fails without it.
-- **Run `pytest`** before opening the pull request.
+- **Run `pytest`, `ruff check src tests` and `mypy`** before opening the pull request.
+- **Add a line to `CHANGELOG.md`** under "Unreleased" for anything a user would notice.
 - **Update the docs** if you change a command, an option or a config field: `README.md` and the pages in `docs/`.
 - **Keep private details out.** Examples and fixtures must not contain your hostnames, home paths, model names
   or GPU UUIDs. The examples use generic names (`llm`, `stt`, `tts`, `embed`) on purpose.

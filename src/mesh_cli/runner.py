@@ -13,8 +13,8 @@ import time
 import urllib.error
 import urllib.request
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from .config import Config, Service
 
@@ -39,7 +39,7 @@ def log_path(log_dir: Path, name: str) -> Path:
 
 def tail_lines(path: Path, count: int) -> str:
     try:
-        with open(path, "r", errors="replace") as handle:
+        with open(path, errors="replace") as handle:
             return "".join(deque(handle, maxlen=count))
     except OSError:
         return ""
@@ -116,6 +116,8 @@ def running_services(log_dir: Path) -> list[str]:
 
 
 def start_service(svc: Service, log_dir: Path) -> subprocess.Popen:
+    if not svc.command:
+        raise RunError(f"service '{svc.name}' has no 'command' in the config")
     path = log_path(log_dir, svc.name)
     with open(path, "wb") as log:
         return subprocess.Popen(

@@ -1,0 +1,39 @@
+name: release
+
+# Publishes to PyPI when a GitHub release is published. Uses PyPI Trusted Publishing (OpenID Connect), so no API
+# token is stored in this repository. One-time setup on PyPI: Account > Publishing > add a pending publisher for
+# project "mesh-cli", owner "mrahmedromman", repository "mesh-cli", workflow "release.yml", environment "pypi".
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Build and check
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write   # lets PyPI verify this workflow's identity
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
