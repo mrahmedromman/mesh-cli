@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import http.client
 import json
 import os
@@ -255,6 +256,10 @@ def _on_sigterm(signum, frame):  # noqa: ARG001
     raise KeyboardInterrupt
 
 
+def _report(progress: Callable[[str | None, float, str], None], name: str, seconds: float, line: str) -> None:
+    progress(name, seconds, line)
+
+
 def _hold_through_interrupts(out: Callable[[str], None]) -> list:
     """Make Ctrl+C and SIGTERM harmless while services are being stopped. Returns what to put back afterwards."""
 
@@ -303,11 +308,11 @@ def run_up(
             started.append((svc, proc))
             state["services"][svc.name] = {"pid": proc.pid, "port": svc.port, "health": svc.health, "stop": svc.stop, "command": svc.command, "log": str(file)}
             write_state(log_dir, state)
+            on_wait: Callable[[float, str], None] | None = None
+            if progress is not None:
+                on_wait = functools.partial(_report, progress, svc.name)
             try:
-                wait_healthy(
-                    svc, proc, file, interval=health_interval,
-                    progress=(lambda seconds, line, name=svc.name: progress(name, seconds, line)) if progress else None,
-                )
+                wait_healthy(svc, proc, file, interval=health_interval, progress=on_wait)
             finally:
                 if progress:
                     progress(None, 0.0, "")

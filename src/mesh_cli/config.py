@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -85,7 +86,7 @@ def load_config(path: str | Path) -> Config:
         raise ConfigError(f"invalid config {path}:\n" + "\n".join(lines)) from exc
 
 
-def _field_hint(error: dict) -> str:
+def _field_hint(error: Mapping[str, Any]) -> str:
     """For an unknown field, suggest the closest real one (for example gpu_memory_utilisation)."""
     if error.get("type") != "extra_forbidden":
         return ""
