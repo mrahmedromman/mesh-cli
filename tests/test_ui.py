@@ -124,18 +124,13 @@ def test_startup_display_shows_one_live_line_and_clears_it():
     assert "✓ llm is up" in text_of(con)
 
 
-def test_live_line_fits_the_current_terminal_width_and_is_cleared_with_one_code(monkeypatch):
+def test_live_line_is_short_and_cleared_with_one_code():
     con = Console(file=io.StringIO(), force_terminal=True, width=110, highlight=False)
     display = ui.StartupDisplay(con)
-    widths = iter([120, 60, 30])
-    monkeypatch.setattr(display, "_width", lambda: next(widths, 30))
-    display._label = ("llm", "0:24", "(EngineCore_DP0 pid=569752) WARNING Reducing Torch parallelism " * 3)
-    for _ in range(3):
-        display._draw()
-    frames = [f for f in con.file.getvalue().split(display.CLEAR) if f]
-    assert len(frames) == 3
-    for frame, width in zip(frames, (120, 60, 30), strict=True):
-        assert len(ui.ANSI.sub("", frame)) < width  # never a full row, so it cannot wrap
+    display._label = ("llm", "0:24")
+    display._draw()
+    frame = con.file.getvalue().split(display.CLEAR)[1]
+    assert ui.ANSI.sub("", frame) == "⠋ llm  0:24"  # no log text, so it cannot wrap unless the window is tiny
     display._label = None
     display._erase()
     assert con.file.getvalue().endswith(display.CLEAR)

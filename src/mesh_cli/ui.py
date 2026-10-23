@@ -185,11 +185,12 @@ def print_status(rows: list[tuple[str, bool, int, int, str]], con: Console | Non
 
 
 class StartupDisplay:
-    """Prints `mesh up` progress lines and, while a service loads, one live line: spinner, time and last log line.
+    """Prints `mesh up` progress lines and, while a service loads, one short live line: spinner, name and time.
 
     The live line is drawn here, not with rich's live display, because that display erases by counting the rows it
     drew. If the terminal is narrowed while a service loads, the line wraps and the count is wrong, which leaves
-    stale rows behind. This reads the terminal width again on every frame and clears with one escape code.
+    stale rows behind. The line is kept short (no log text) so it does not wrap unless the window is tiny, and it
+    is cleared with one escape code. The service's log is read with `mesh logs NAME -f`.
     """
 
     FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -198,7 +199,7 @@ class StartupDisplay:
     def __init__(self, con: Console | None = None) -> None:
         self.con = con or console()
         self._lock = threading.Lock()
-        self._label: tuple[str, str, str] | None = None
+        self._label: tuple[str, str] | None = None
         self._frame = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -213,9 +214,8 @@ class StartupDisplay:
             self.close()
             return
         minutes, seconds = divmod(int(elapsed), 60)
-        log = ANSI.sub("", last_line).strip()
         with self._lock:
-            self._label = (name, f"{minutes}:{seconds:02d}", log)
+            self._label = (name, f"{minutes}:{seconds:02d}")
             if self._thread is None:
                 self._stop.clear()
                 self._thread = threading.Thread(target=self._animate, daemon=True)
@@ -238,20 +238,12 @@ class StartupDisplay:
                 self._frame += 1
                 self._draw()
 
-    def _width(self) -> int:
-        try:
-            return os.get_terminal_size(self.con.file.fileno()).columns
-        except (OSError, ValueError):
-            return self.con.width
-
     def _draw(self) -> None:
         if self._label is None:
             return
-        name, clock, log = self._label
-        room = max(self._width() - len(name) - len(clock) - 7, 10)  # one spare column: a full row can wrap early
-        log = log if len(log) <= room else log[: room - 1] + "…"
+        name, clock = self._label
         spinner = self.FRAMES[self._frame % len(self.FRAMES)]
-        self.con.file.write(f"{self.CLEAR}\x1b[36m{spinner}\x1b[0m \x1b[1m{name}\x1b[0m  {clock}  \x1b[2m{log}\x1b[0m")
+        self.con.file.write(f"{self.CLEAR}\x1b[36m{spinner}\x1b[0m \x1b[1m{name}\x1b[0m  {clock}")
         self.con.file.flush()
 
     def _erase(self) -> None:

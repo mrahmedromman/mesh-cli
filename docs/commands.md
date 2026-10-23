@@ -179,7 +179,7 @@ the current log directory (it honours `--log-dir` in bash and zsh; fish uses the
 ## Terminal output
 
 In an interactive terminal, `mesh` draws colour, tables and memory bars, and while a service loads during
-`mesh up` it shows one live line: a spinner, the time so far and the last line of that service's log.
+`mesh up` it shows one live line: a spinner and the time so far. Follow the service's log with `mesh logs NAME -f`.
 
 ```
 ⠹ llm  2:14  Loading safetensors shards 3/8
