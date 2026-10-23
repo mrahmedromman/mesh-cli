@@ -60,12 +60,16 @@ starting things in the right order, and finding which log holds the error is ted
   fails for lack of memory.
 - **Clean shutdown.** One Ctrl+C (or `mesh down`) stops everything in reverse order, tells you as each service
   stops, and ends with a completion message.
+- **Readable in a terminal.** Colour, tables, memory bars, and a live line while a model loads (time and the last
+  log line). When output is piped or `NO_COLOR` is set, it prints plain text.
+- **Helpful errors and Tab completion.** A mistyped command, service name, config field or file gets a "did you
+  mean" hint, and `mesh completion bash|zsh|fish` adds Tab completion, including your service names.
 - **Just a YAML file.** No daemon, no proxy, nothing listening on a port.
 
 ## Install
 
 A PyPI release is planned. Until then, install from source (use a separate environment from the one that
-runs your models; `mesh` only needs `pydantic` and `pyyaml`):
+runs your models; `mesh` needs only `pydantic`, `pyyaml` and `rich`):
 
 ```bash
 git clone https://github.com/mrahmedromman/mesh-cli.git
@@ -140,6 +144,7 @@ planner is most accurate with measured numbers. See [Config](docs/config.md#gett
 | `mesh status` | Shows each service's state, process id, port and health. |
 | `mesh logs NAME [-n N\|all] [-f]` | Shows or follows a service's log. |
 | `mesh gpu` | Shows each GPU's memory and utilization, and who is holding the memory. |
+| `mesh completion SHELL` | Prints a Tab-completion script for `bash`, `zsh` or `fish`. |
 
 All options, `mesh logs` examples, exit codes and where files go: [docs/commands.md](docs/commands.md).
 

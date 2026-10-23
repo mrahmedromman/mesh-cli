@@ -245,3 +245,49 @@ def test_permission_denied_is_reported_not_raised(monkeypatch):
     assert stuck == 1
     assert any("could not stop other-users-service: permission denied" in l for l in lines)
     assert lines[-1] == "1 of 1 service could not be stopped."
+
+
+def test_run_up_reports_progress_for_each_service_and_clears_it(tmp_path):
+    events = []
+    config = Config(services=[http_service("a", free_port(), tmp_path)])
+    runner.run_up(config, tmp_path / "logs", hold=lambda: False, out=lambda _: None, health_interval=0.2, grace=5,
+                  progress=lambda name, seconds, line: events.append(name))
+    assert events[-1] is None
+    assert set(events) <= {"a", None}
+
+
+def test_a_second_ctrl_c_during_shutdown_does_not_abort_the_cleanup(tmp_path):
+    import signal
+    import subprocess
+    import time
+
+    port = free_port()
+    cfg = tmp_path / "models.yaml"
+    cfg.write_text(
+        "services:\n"
+        f"  - {{name: a, port: {port}, gpus: [0], health: /, stop: 'sleep 1', "
+        f"command: 'exec {sys.executable} -m http.server {port} --bind 127.0.0.1 --directory {tmp_path}'}}\n"
+    )
+    log_dir = tmp_path / "logs"
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    up = subprocess.Popen(
+        [sys.executable, "-m", "mesh_cli.cli", "up", str(cfg), "--log-dir", str(log_dir)],
+        env={**os.environ, "PYTHONPATH": src}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not runner.probe(port, "/"):
+            time.sleep(0.2)
+        assert runner.probe(port, "/") == 200
+        up.send_signal(signal.SIGINT)
+        time.sleep(0.4)  # the stop command takes a second, so cleanup is under way
+        up.send_signal(signal.SIGINT)
+        up.send_signal(signal.SIGTERM)
+        assert up.wait(timeout=30) == 0
+    finally:
+        if up.poll() is None:
+            up.kill()
+    output = up.stdout.read()
+    assert "Traceback" not in output and "All services stopped." in output
+    assert runner.probe(port, "/") is None
+    assert runner.read_state(log_dir) is None

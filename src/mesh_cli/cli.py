@@ -3,14 +3,30 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
 
-from . import __version__, holders, runner
+from . import __version__, completion, holders, runner, ui
 from .config import ConfigError, load_config
 from .gpu import GpuError, parse_gpu_query, read_gpus
 from .planner import GpuBudget, Plan, PlanError, make_plan
+from .suggest import did_you_mean
+
+
+class _Parser(argparse.ArgumentParser):
+    """Adds a 'did you mean' to the unknown-command and invalid-value errors."""
+
+    def error(self, message: str):
+        found = re.search(r"invalid choice: '?(.+?)'? \(choose from (.+)\)", message)
+        if found and "maybe you meant" not in message:  # newer Pythons add their own suggestion
+            word = found.group(1)
+            options = [o.strip().strip("'") for o in found.group(2).split(",")]
+            options = [o for o in options if not o.startswith("_")]
+            what = "command" if message.startswith("argument command") else "value"
+            message = f"unknown {what} '{word}'.{did_you_mean(word, options)} Choose from: {', '.join(options)}"
+        super().error(message)
 
 
 def _parse_external(value: str) -> dict[int, int]:
@@ -88,12 +104,28 @@ def _show_holders(log_dir: Path, title: str, only: set[int] | None = None) -> No
     except (GpuError, OSError) as exc:
         print(f"\n(could not read which processes hold GPU memory: {exc})")
         return
+    if ui.fancy():
+        con = ui.console()
+        con.print(f"\n{title}\n", style="bold", markup=False)
+        ui.print_holders(reports, con)
+        return
     print(f"\n{title}\n\n{holders.render(reports)}")
 
 
 def _cmd_gpu(args: argparse.Namespace) -> int:
-    print(holders.render(holders.gather(Path(args.log_dir))))
+    reports = holders.gather(Path(args.log_dir))
+    if ui.fancy():
+        ui.print_holders(reports)
+    else:
+        print(holders.render(reports))
     return 0
+
+
+def _show_plan(plan: Plan, budgets: list[GpuBudget]) -> None:
+    if ui.fancy():
+        ui.print_plan(plan, budgets)
+    else:
+        print(_render(plan, budgets))
 
 
 def _cmd_plan(args: argparse.Namespace) -> int:
@@ -103,7 +135,7 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         print("note: counting all memory currently in use as external; stop running services or pass --external")
     budgets = _budgets(gpus, args.external)
     plan = make_plan(config, budgets)
-    print(_render(plan, budgets))
+    _show_plan(plan, budgets)
     if args.external is None and not args.gpus_csv and any(b.external_mib > 0 for b in budgets):
         _show_holders(Path(args.log_dir), "Memory currently in use, by holder:", {b.index for b in budgets if b.external_mib > 0})
     return 0 if plan.ok else 1
@@ -125,7 +157,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
     if gpus is not None:
         budgets = _budgets(gpus, None)
         plan = make_plan(config, budgets)
-        print(_render(plan, budgets))
+        _show_plan(plan, budgets)
         if not plan.ok and not args.force:
             print("\nThe plan does not fit. Fix the config, or start anyway with --force.")
             short = {c.gpu for s in plan.services for c in s.checks if not c.ok}
@@ -133,19 +165,27 @@ def _cmd_up(args: argparse.Namespace) -> int:
             return 1
         print()
         snapshot = lambda: {g.index: g.used_mib for g in read_gpus()}  # noqa: E731
+    display = ui.StartupDisplay() if ui.fancy() else None
     try:
-        runner.run_up(config, log_dir, snapshot=snapshot)
+        if display:
+            runner.run_up(config, log_dir, snapshot=snapshot, out=display.out, progress=display.progress)
+        else:
+            runner.run_up(config, log_dir, snapshot=snapshot)
     except runner.RunError as exc:
         print(f"error: {exc}", file=sys.stderr)
         if isinstance(exc, runner.ServiceExited) and _looks_like_memory_error(str(exc)):
             _show_holders(log_dir, "Who is holding GPU memory now (the services mesh started have been stopped):")
         return 1
+    finally:
+        if display:
+            display.close()
     return 0
 
 
 def _cmd_down(args: argparse.Namespace) -> int:
-    if not runner.stop_from_state(Path(args.log_dir)):
-        print("nothing running")
+    out = ui.StartupDisplay().out if ui.fancy() else print
+    if not runner.stop_from_state(Path(args.log_dir), out=out):
+        print(f"nothing running (looked for {Path(args.log_dir) / runner.STATE_FILE})")
     return 0
 
 
@@ -154,18 +194,30 @@ def _cmd_status(args: argparse.Namespace) -> int:
     if not state:
         print("nothing running")
         return 0
+    rows = []
     for name, info in state["services"].items():
         alive = runner.group_alive(info["pid"])
         code = runner.probe(info["port"], info["health"]) if alive else None
         health = f"HTTP {code}" if code is not None else "not answering"
-        print(f"{name:<12} {'running' if alive else 'stopped':<8} pid {info['pid']:<8} port {info['port']:<6} {health}")
+        rows.append((name, alive, info["pid"], info["port"], health))
+    if ui.fancy():
+        ui.print_status(rows)
+        return 0
+    for name, alive, pid, port, health in rows:
+        print(f"{name:<12} {'running' if alive else 'stopped':<8} pid {pid:<8} port {port:<6} {health}")
     return 0
 
 
 def _cmd_logs(args: argparse.Namespace) -> int:
     path = runner.log_path(Path(args.log_dir), args.service)
     if not path.exists():
-        print(f"error: no log file {path}", file=sys.stderr)
+        known = runner.known_services(Path(args.log_dir))
+        if known:
+            print(f"error: no log for service '{args.service}'.{did_you_mean(args.service, known)} "
+                  f"Known services: {', '.join(known)}", file=sys.stderr)
+        else:
+            print(f"error: no log file {path}. Start a stack with 'mesh up', or pass --log-dir if it uses another directory.",
+                  file=sys.stderr)
         return 1
     try:
         with open(path, "r", errors="replace") as handle:
@@ -189,10 +241,21 @@ def _cmd_logs(args: argparse.Namespace) -> int:
         return 0
 
 
+def _cmd_completion(args: argparse.Namespace) -> int:
+    print(completion.script(args.shell, build_parser()), end="")
+    return 0
+
+
+def _cmd_complete(args: argparse.Namespace) -> int:
+    for name in runner.known_services(Path(args.log_dir)):
+        print(name)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="mesh", description="Plan and run multi-service GPU stacks.")
+    parser = _Parser(prog="mesh", description="Plan and run multi-service GPU stacks.")
     parser.add_argument("--version", action="version", version=f"mesh {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=True, metavar="command")
 
     plan = sub.add_parser("plan", help="check whether the services fit on the GPUs, in order")
     plan.add_argument("config", help="path to models.yaml")
@@ -226,6 +289,16 @@ def build_parser() -> argparse.ArgumentParser:
     logs.add_argument("-f", "--follow", action="store_true", help="keep printing new lines until Ctrl+C")
     logs.add_argument("--log-dir", default="logs")
     logs.set_defaults(func=_cmd_logs)
+
+    comp = sub.add_parser("completion", help="print a shell completion script (bash, zsh or fish)")
+    comp.add_argument("shell", choices=completion.SHELLS)
+    comp.set_defaults(func=_cmd_completion)
+
+    # Used by the completion scripts; hidden from --help.
+    hidden = sub.add_parser("_complete")
+    hidden.add_argument("what", choices=["services"])
+    hidden.add_argument("--log-dir", default="logs")
+    hidden.set_defaults(func=_cmd_complete)
     return parser
 
 

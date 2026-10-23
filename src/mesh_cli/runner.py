@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -42,6 +43,19 @@ def tail_lines(path: Path, count: int) -> str:
             return "".join(deque(handle, maxlen=count))
     except OSError:
         return ""
+
+
+def last_line(path: Path, size: int = 4096) -> str:
+    """The most recent non-empty line of a log, reading only its tail. A progress bar that redraws itself counts as one line per redraw."""
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, 2)
+            handle.seek(max(0, handle.tell() - size))
+            data = handle.read().decode(errors="replace")
+    except OSError:
+        return ""
+    lines = [line for line in re.split(r"[\r\n]+", data) if line.strip()]
+    return lines[-1] if lines else ""
 
 
 def probe(port: int, path: str, timeout: float = 3.0) -> int | None:
@@ -86,6 +100,16 @@ def clear_state(log_dir: Path) -> None:
         pass
 
 
+def known_services(log_dir: Path) -> list[str]:
+    """Names of services mesh has started from this log directory: the ones in the state file plus any with a log."""
+    names = set((read_state(log_dir) or {}).get("services", {}))
+    try:
+        names.update(p.stem for p in Path(log_dir).glob("*.log"))
+    except OSError:
+        pass
+    return sorted(names)
+
+
 def running_services(log_dir: Path) -> list[str]:
     state = read_state(log_dir) or {}
     return [name for name, info in state.get("services", {}).items() if group_alive(info["pid"])]
@@ -111,8 +135,10 @@ def wait_healthy(
     probe_fn: Callable[[int, str], int | None] = probe,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
+    progress: Callable[[float, str], None] | None = None,
 ) -> None:
-    deadline = clock() + svc.start_timeout_s
+    began = clock()
+    deadline = began + svc.start_timeout_s
     while True:
         code = proc.poll()
         if code is not None:
@@ -127,6 +153,8 @@ def wait_healthy(
                 f"{svc.name} did not answer on port {svc.port}{svc.health} within {svc.start_timeout_s}s. "
                 f"See {log_file}"
             )
+        if progress is not None:
+            progress(clock() - began, last_line(log_file))
         sleep(interval)
 
 
@@ -225,6 +253,15 @@ def _on_sigterm(signum, frame):  # noqa: ARG001
     raise KeyboardInterrupt
 
 
+def _hold_through_interrupts(out: Callable[[str], None]) -> list:
+    """Make Ctrl+C and SIGTERM harmless while services are being stopped. Returns what to put back afterwards."""
+
+    def note(signum, frame):  # noqa: ARG001
+        out("  still stopping, please wait...")
+
+    return [(sig, signal.signal(sig, note)) for sig in (signal.SIGINT, signal.SIGTERM)]
+
+
 def _say(message: str) -> None:
     print(message, flush=True)  # flush so progress shows up when output is piped to a file
 
@@ -237,8 +274,12 @@ def run_up(
     out: Callable[[str], None] = _say,
     health_interval: float = 2.0,
     grace: float = 30.0,
+    progress: Callable[[str | None, float, str], None] | None = None,
 ) -> None:
-    """Start every service in order. Blocks (while `hold()` is true, default forever), then stops everything."""
+    """Start every service in order. Blocks (while `hold()` is true, default forever), then stops everything.
+
+    `progress(name, seconds, last_log_line)` is called while a service loads; `progress(None, 0, "")` when it stops.
+    """
     missing = [s.name for s in config.services if not s.command]
     if missing:
         raise RunError(f"these services have no 'command' in the config: {', '.join(missing)}")
@@ -260,7 +301,14 @@ def run_up(
             started.append((svc, proc))
             state["services"][svc.name] = {"pid": proc.pid, "port": svc.port, "health": svc.health, "stop": svc.stop, "command": svc.command, "log": str(file)}
             write_state(log_dir, state)
-            wait_healthy(svc, proc, file, interval=health_interval)
+            try:
+                wait_healthy(
+                    svc, proc, file, interval=health_interval,
+                    progress=(lambda seconds, line, name=svc.name: progress(name, seconds, line)) if progress else None,
+                )
+            finally:
+                if progress:
+                    progress(None, 0.0, "")
             line = f"      {svc.name} is up"
             if before is not None and snapshot:
                 after = snapshot()
@@ -279,11 +327,18 @@ def run_up(
     except KeyboardInterrupt:
         out("")  # Ctrl+C leaves the cursor after "^C"
     finally:
-        if previous_handler is not None:
-            signal.signal(signal.SIGTERM, previous_handler)
-        if started:
-            stop_all([(svc.name, proc.pid, svc.stop, proc) for svc, proc in reversed(started)], grace, out)
-        clear_state(log_dir)
+        # Cleanup must finish: a second Ctrl+C (or a SIGTERM from `mesh down`) would otherwise abort it halfway and
+        # leave services running with a stale state file.
+        restore = _hold_through_interrupts(out) if threading.current_thread() is threading.main_thread() else []
+        try:
+            if started:
+                stop_all([(svc.name, proc.pid, svc.stop, proc) for svc, proc in reversed(started)], grace, out)
+            clear_state(log_dir)
+        finally:
+            for sig, handler in restore:
+                signal.signal(sig, handler)
+            if previous_handler is not None:
+                signal.signal(signal.SIGTERM, previous_handler)
 
 
 def stop_from_state(

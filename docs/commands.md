@@ -10,6 +10,7 @@ Back to the [README](../README.md) · [Config reference](config.md) · [How it w
 | `mesh status` | Shows each service's state, process id, port and health. |
 | `mesh logs NAME` | Shows or follows a service's log. |
 | `mesh gpu` | Shows each GPU's memory and utilization, and who is holding the memory. |
+| `mesh completion SHELL` | Prints a Tab-completion script for `bash`, `zsh` or `fish`. |
 | `mesh --version` | Prints the version. |
 
 ## Options
@@ -149,6 +150,47 @@ Other lines you may see:
 - If `mesh up` does not finish within 90 seconds, `mesh down` says so and stops the remaining services itself.
 
 The same messages appear when `mesh up` cleans up after a service fails to start.
+
+## Suggestions and Tab completion
+
+When you mistype something, `mesh` suggests the closest match instead of only failing:
+
+```
+$ mesh stauts
+mesh: error: unknown command 'stauts'. Did you mean 'status'? Choose from: plan, gpu, up, down, status, logs, completion
+$ mesh logs lm
+error: no log for service 'lm'. Did you mean 'llm'? Known services: llm, stt, tts
+```
+
+The same applies to a config file name (`models.yml` for `models.yaml`) and to a misspelled field in the config
+(`gpu_memory_utilisation` suggests `gpu_memory_utilization`).
+
+To turn on Tab completion, add one line to your shell's startup file, then open a new terminal:
+
+| Shell | Add this |
+|---|---|
+| bash | `eval "$(mesh completion bash)"` to `~/.bashrc` |
+| zsh | `eval "$(mesh completion zsh)"` to `~/.zshrc`, after `compinit` |
+| fish | `mesh completion fish > ~/.config/fish/completions/mesh.fish` |
+
+It completes commands, options, config files and shell names. `mesh logs <Tab>` lists the services of the stack in
+the current log directory (it honours `--log-dir` in bash and zsh; fish uses the default `logs`).
+
+## Terminal output
+
+In an interactive terminal, `mesh` draws colour, tables and memory bars, and while a service loads during
+`mesh up` it shows one live line: a spinner, the time so far and the last line of that service's log.
+
+```
+⠹ llm  2:14  Loading safetensors shards 3/8
+```
+
+The line disappears when the service is up and is replaced by `✓ llm is up`. Bars are green below 70% of a
+GPU's memory, yellow up to 90% and red above that.
+
+When output is not a terminal (piped, redirected, run from a script or CI), or when the `NO_COLOR` environment
+variable is set, or `TERM=dumb`, `mesh` prints plain text with no escape codes. The words are the same in both
+modes.
 
 ## Exit codes
 

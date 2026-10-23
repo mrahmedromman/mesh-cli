@@ -8,6 +8,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from .suggest import did_you_mean
+
 
 class ConfigError(Exception):
     pass
@@ -65,7 +67,10 @@ def load_config(path: str | Path) -> Config:
     try:
         raw = yaml.safe_load(path.read_text())
     except OSError as exc:
-        raise ConfigError(f"cannot read {path}: {exc.strerror}") from exc
+        hint = ""
+        if not path.exists() and path.parent.is_dir():
+            hint = did_you_mean(path.name, (p.name for p in path.parent.iterdir() if p.suffix in (".yaml", ".yml")))
+        raise ConfigError(f"cannot read {path}: {exc.strerror}.{hint}") from exc
     except yaml.YAMLError as exc:
         raise ConfigError(f"{path} is not valid YAML: {exc}") from exc
     if not isinstance(raw, dict):
@@ -73,5 +78,15 @@ def load_config(path: str | Path) -> Config:
     try:
         return Config.model_validate(raw)
     except ValidationError as exc:
-        lines = [f"  {'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()]
+        lines = [f"  {'.'.join(str(p) for p in e['loc'])}: {e['msg']}{_field_hint(e)}" for e in exc.errors()]
         raise ConfigError(f"invalid config {path}:\n" + "\n".join(lines)) from exc
+
+
+def _field_hint(error: dict) -> str:
+    """For an unknown field, suggest the closest real one (for example gpu_memory_utilisation)."""
+    if error.get("type") != "extra_forbidden":
+        return ""
+    loc = error["loc"]
+    model = Service if "services" in loc[:-1] else Config
+    hint = did_you_mean(str(loc[-1]), model.model_fields)
+    return f". {hint.strip()}" if hint else ""
