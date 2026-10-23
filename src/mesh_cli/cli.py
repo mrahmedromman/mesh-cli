@@ -169,7 +169,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
 def _cmd_down(args: argparse.Namespace) -> int:
     out = ui.StartupDisplay().out if ui.fancy() else print
     if not runner.stop_from_state(Path(args.log_dir), out=out):
-        print("nothing running")
+        print(f"nothing running (looked for {Path(args.log_dir) / runner.STATE_FILE})")
     return 0
 
 

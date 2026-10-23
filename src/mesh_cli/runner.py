@@ -243,6 +243,15 @@ def _on_sigterm(signum, frame):  # noqa: ARG001
     raise KeyboardInterrupt
 
 
+def _hold_through_interrupts(out: Callable[[str], None]) -> list:
+    """Make Ctrl+C and SIGTERM harmless while services are being stopped. Returns what to put back afterwards."""
+
+    def note(signum, frame):  # noqa: ARG001
+        out("  still stopping, please wait...")
+
+    return [(sig, signal.signal(sig, note)) for sig in (signal.SIGINT, signal.SIGTERM)]
+
+
 def _say(message: str) -> None:
     print(message, flush=True)  # flush so progress shows up when output is piped to a file
 
@@ -308,11 +317,18 @@ def run_up(
     except KeyboardInterrupt:
         out("")  # Ctrl+C leaves the cursor after "^C"
     finally:
-        if previous_handler is not None:
-            signal.signal(signal.SIGTERM, previous_handler)
-        if started:
-            stop_all([(svc.name, proc.pid, svc.stop, proc) for svc, proc in reversed(started)], grace, out)
-        clear_state(log_dir)
+        # Cleanup must finish: a second Ctrl+C (or a SIGTERM from `mesh down`) would otherwise abort it halfway and
+        # leave services running with a stale state file.
+        restore = _hold_through_interrupts(out) if threading.current_thread() is threading.main_thread() else []
+        try:
+            if started:
+                stop_all([(svc.name, proc.pid, svc.stop, proc) for svc, proc in reversed(started)], grace, out)
+            clear_state(log_dir)
+        finally:
+            for sig, handler in restore:
+                signal.signal(sig, handler)
+            if previous_handler is not None:
+                signal.signal(signal.SIGTERM, previous_handler)
 
 
 def stop_from_state(

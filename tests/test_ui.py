@@ -5,7 +5,7 @@ import sys
 
 from rich.console import Console
 
-from mesh_cli import holders, planner, runner, ui
+from mesh_cli import holders, runner, ui
 from mesh_cli.config import Config, Service
 from mesh_cli.gpu import Gpu
 from mesh_cli.planner import GpuBudget, make_plan

@@ -12,7 +12,8 @@ import re
 import sys
 
 from rich import box
-from rich.console import Console
+from rich.console import Console, JustifyMethod
+from rich.status import Status
 from rich.table import Table
 from rich.text import Text
 
@@ -28,6 +29,11 @@ KIND_STYLE = {
     "other": "yellow",
     "unattributed": "dim italic",
 }
+
+
+def _columns(table: Table, spec: tuple[tuple[str, JustifyMethod], ...]) -> None:
+    for title, justify in spec:
+        table.add_column(title, justify=justify)
 
 
 def fancy() -> bool:
@@ -99,17 +105,15 @@ def print_plan(plan: Plan, budgets: list[GpuBudget], con: Console | None = None)
     con.print(Text(f"Plan for {len(plan.services)} services on {len(budgets)} GPUs", style="bold"))
 
     gpus = Table(box=box.SIMPLE_HEAD, pad_edge=False)
-    for column, justify in (("GPU", "left"), ("Card", "left"), ("Total", "right"), ("Reserved", "right"), ("In use by others", "left")):
-        gpus.add_column(column, justify=justify)
+    _columns(gpus, (("GPU", "left"), ("Card", "left"), ("Total", "right"), ("Reserved", "right"), ("In use by others", "left")))
     for b in budgets:
         in_use = Text.assemble(bar(b.external_mib, b.total_mib), f"  {b.external_mib} MiB")
         gpus.add_row(str(b.index), b.name, f"{b.total_mib} MiB", f"{b.reserved_mib} MiB", in_use)
     con.print(gpus)
 
     services = Table(box=box.SIMPLE_HEAD, pad_edge=False)
-    for column, justify in (("#", "right"), ("Service", "left"), ("Result", "left"), ("GPU", "right"),
-                            ("Needs free", "right"), ("Free before", "right"), ("Will hold", "right")):
-        services.add_column(column, justify=justify)
+    _columns(services, (("#", "right"), ("Service", "left"), ("Result", "left"), ("GPU", "right"),
+                        ("Needs free", "right"), ("Free before", "right"), ("Will hold", "right")))
     for number, svc in enumerate(plan.services, 1):
         result = Text("✓ fits", style="green") if svc.ok else Text("✗ does not fit", style="bold red")
         for position, check in enumerate(svc.checks):
@@ -131,8 +135,7 @@ def print_plan(plan: Plan, budgets: list[GpuBudget], con: Console | None = None)
 
     totals = {b.index: b.total_mib for b in budgets}
     after = Table(box=box.SIMPLE_HEAD, pad_edge=False, title="After all services start", title_justify="left")
-    for column, justify in (("GPU", "left"), ("Memory", "left"), ("Free", "right")):
-        after.add_column(column, justify=justify)
+    _columns(after, (("GPU", "left"), ("Memory", "left"), ("Free", "right")))
     for index, left in sorted(plan.free_after_mib.items()):
         total = totals.get(index, 0)
         after.add_row(str(index), Text.assemble(bar(total - left, total), f"  {_percent(total - left, total)}"), f"{left} MiB")
@@ -173,8 +176,7 @@ def print_status(rows: list[tuple[str, bool, int, int, str]], con: Console | Non
     """rows: (name, running, pid, port, health text)."""
     con = con or console()
     table = Table(box=box.SIMPLE_HEAD, pad_edge=False)
-    for column, justify in (("Service", "left"), ("State", "left"), ("PID", "right"), ("Port", "right"), ("Health", "left")):
-        table.add_column(column, justify=justify)
+    _columns(table, (("Service", "left"), ("State", "left"), ("PID", "right"), ("Port", "right"), ("Health", "left")))
     for name, running, pid, port, health in rows:
         state = Text("● running", style="green") if running else Text("○ stopped", style="red")
         answering = running and not health.startswith("not")
@@ -187,7 +189,7 @@ class StartupDisplay:
 
     def __init__(self, con: Console | None = None) -> None:
         self.con = con or console()
-        self._status = None
+        self._status: Status | None = None
 
     def out(self, line: str) -> None:
         self.con.print(style_line(line))
