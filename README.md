@@ -1,10 +1,25 @@
-# mesh-cli
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img alt="mesh-cli" src="docs/assets/logo-light.svg" width="320">
+  </picture>
+</p>
 
-**Know your AI stack fits your GPUs before you start it.**
+<p align="center"><b>Know your AI stack fits your GPUs before you start it.</b></p>
 
-![license: MIT](https://img.shields.io/badge/license-MIT-blue) ![python: 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![status: early](https://img.shields.io/badge/status-early-orange)
+<p align="center">
+  <img alt="license: MIT" src="https://img.shields.io/badge/license-MIT-blue">
+  <img alt="python: 3.10+" src="https://img.shields.io/badge/python-3.10%2B-blue">
+  <img alt="status: early" src="https://img.shields.io/badge/status-early-orange">
+</p>
 
-[Quickstart](#quickstart) · [Commands](docs/commands.md) · [Config](docs/config.md) · [How it works](docs/how-it-works.md)
+<p align="center">
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="docs/commands.md">Commands</a> ·
+  <a href="docs/config.md">Config</a> ·
+  <a href="docs/how-it-works.md">How it works</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
 `mesh` plans and starts a stack of local AI services (vLLM, speech-to-text, embeddings, TTS) on shared GPUs,
 in the right order, with one log file per service.
@@ -157,22 +172,10 @@ configs you trust. `mesh` itself sends nothing anywhere: it runs `nvidia-smi`, s
 
 ## Contributing
 
-```bash
-git clone https://github.com/mrahmedromman/mesh-cli.git
-cd mesh-cli
-pip install -e ".[dev]"
-pytest
-```
-
-Tests need no GPU. `tests/fixtures/` holds real `nvidia-smi` output. The most useful contribution is output
-from a different GPU: open a pull request that adds these two files as fixtures with a test:
-
-```bash
-nvidia-smi --query-gpu=index,uuid,name,memory.total,memory.used,memory.free --format=csv
-nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=csv
-```
-
-(Replace the `uuid` values if you prefer.) Bug reports and ideas are welcome as issues.
+Tests need no GPU: `pip install -e ".[dev]"` then `pytest`. The most useful contribution is real `nvidia-smi`
+output from a GPU other than an RTX 4090, added as a test fixture. Bug reports and ideas are welcome as issues.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the exact commands, what to include in a bug report, and what is in
+scope.
 
 ## License
 
