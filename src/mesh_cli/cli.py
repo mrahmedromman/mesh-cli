@@ -128,6 +128,20 @@ def _show_plan(plan: Plan, budgets: list[GpuBudget]) -> None:
         print(_render(plan, budgets))
 
 
+def _plan_summary(plan: Plan, budgets: list[GpuBudget]) -> str:
+    free = ", ".join(f"GPU {i}: {mib} MiB" for i, mib in sorted(plan.free_after_mib.items()))
+    return f"Plan: all {len(plan.services)} services fit on {len(budgets)} GPUs. Free once they are up: {free}."
+
+
+def _plan_has_news(plan: Plan) -> bool:
+    """True when the plan has something to read: a service that will not fit, a warning, a note, or an unknown size."""
+    return bool(
+        not plan.ok
+        or plan.warnings
+        or any(s.notes or any(c.needed_mib is None for c in s.checks) for s in plan.services)
+    )
+
+
 def _cmd_plan(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     gpus = parse_gpu_query(Path(args.gpus_csv).read_text()) if args.gpus_csv else read_gpus()
@@ -157,7 +171,10 @@ def _cmd_up(args: argparse.Namespace) -> int:
     if gpus is not None:
         budgets = _budgets(gpus, None)
         plan = make_plan(config, budgets)
-        _show_plan(plan, budgets)
+        if args.plan or _plan_has_news(plan):
+            _show_plan(plan, budgets)
+        else:
+            print(_plan_summary(plan, budgets))
         if not plan.ok and not args.force:
             print("\nThe plan does not fit. Fix the config, or start anyway with --force.")
             short = {c.gpu for s in plan.services for c in s.checks if not c.ok}
@@ -272,6 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("config", help="path to models.yaml")
     up.add_argument("--log-dir", default="logs")
     up.add_argument("--force", action="store_true", help="start even if the plan says a service will not fit")
+    up.add_argument("--plan", action="store_true", help="always print the full plan (by default only a one-line summary when everything fits)")
     up.set_defaults(func=_cmd_up)
 
     for name, help_text, func in (

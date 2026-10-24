@@ -20,6 +20,7 @@ Back to the [README](../README.md) · [Config reference](config.md) · [How it w
 | `--gpus-csv FILE` | `plan` | Read GPUs from saved `nvidia-smi` output instead of running it. Handy for testing and for planning on another machine. |
 | `--external 0=417,1=4` | `plan` | Memory (MiB) already used by other programs on each GPU. Without it, `plan` counts everything currently in use as external and prints a note. |
 | `--force` | `up` | Start even if the plan says a service will not fit. |
+| `--plan` | `up` | Print the full plan. By default `up` prints one summary line when everything fits, and the full plan only when there is something to read (a service that does not fit, a warning, or a note). `mesh plan` always prints it in full. |
 | `--log-dir DIR` | `up`, `down`, `status`, `logs`, `gpu`, `plan` | Where logs and state live. Default `logs` in the current directory. Use the same value for every command. `gpu` and `plan` read it only to recognise your running services. |
 | `-n N` | `logs` | Show the last `N` lines. Default 50. `-n 0` shows none (useful with `-f` to see only new lines). |
 | `-n all` | `logs` | Show the whole log from the start, without needing to know how many lines it has. |
@@ -49,6 +50,7 @@ nvidia-smi --query-gpu=index,uuid,name,memory.total,memory.used,memory.free --fo
 ```bash
 mesh up models.yaml
 mesh up models.yaml --force
+mesh up models.yaml --plan     # also print the full plan when everything fits
 ```
 
 See [How it works](how-it-works.md#what-mesh-up-does) for the exact steps. In short: plan, start each service

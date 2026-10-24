@@ -15,6 +15,8 @@ All notable changes to this project are recorded here. The format follows
   interactive terminal. Piped output and `NO_COLOR` keep the plain text. Adds the `rich` dependency.
 - "Did you mean" hints for mistyped commands, service names, config fields and config file names.
 - `mesh completion bash|zsh|fish` prints a Tab-completion script; `mesh logs` completes service names.
+- `mesh up` prints a one-line plan summary when everything fits, and the full plan only when there is something
+  to read or with `--plan`.
 - Type information is shipped with the package (`py.typed`).
 
 ### Fixed
