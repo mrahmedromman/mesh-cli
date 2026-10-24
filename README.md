@@ -60,8 +60,8 @@ starting things in the right order, and finding which log holds the error is ted
   fails for lack of memory.
 - **Clean shutdown.** One Ctrl+C (or `mesh down`) stops everything in reverse order, tells you as each service
   stops, and ends with a completion message.
-- **Readable in a terminal.** Colour, tables, memory bars, and a live line while a model loads (time and the last
-  log line). When output is piped or `NO_COLOR` is set, it prints plain text.
+- **Readable in a terminal.** Colour, tables, memory bars, and a live line while a model loads (a spinner and
+  the time so far). When output is piped or `NO_COLOR` is set, it prints plain text.
 - **Helpful errors and Tab completion.** A mistyped command, service name, config field or file gets a "did you
   mean" hint, and `mesh completion bash|zsh|fish` adds Tab completion, including your service names.
 - **Just a YAML file.** No daemon, no proxy, nothing listening on a port.

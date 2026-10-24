@@ -45,7 +45,8 @@ Behaviour on other GPUs, drivers and vLLM versions is not yet known. See
 
 ## What `mesh up` does
 
-1. Reads `nvidia-smi`, runs the plan, and prints it. If a service will not fit it stops, unless `--force` is
+1. Reads `nvidia-smi` and runs the plan. When everything fits it prints one summary line (the full plan with
+   `--plan`, or when the plan has a warning or note). If a service will not fit it stops, unless `--force` is
    given. Without `nvidia-smi` it skips the plan and the memory numbers and says so.
 2. Refuses to start if a previous stack from this log directory is still running (run `mesh down` first).
 3. Starts services one at a time, in the order listed. Each runs as `bash -c <command>` in its own process group.

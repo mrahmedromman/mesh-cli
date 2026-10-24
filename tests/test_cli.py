@@ -187,3 +187,28 @@ def test_bad_config_returns_2(tmp_path, capsys):
     cfg.write_text("services: []\n")
     assert main(["plan", str(cfg), "--gpus-csv", FIXTURE]) == 2
     assert "error:" in capsys.readouterr().err
+
+
+def run_up_with_fake_start(tmp_path, monkeypatch, capsys, extra=(), services="  - {name: svc, port: 8001, gpus: [0], gpu_memory_utilization: 0.1, measured_mib: {0: 2500}, command: 'true'}\n"):
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    monkeypatch.setattr(cli_module.runner, "run_up", lambda *a, **k: None)
+    cfg = write_cfg(tmp_path, "services:\n" + services)
+    assert main(["up", cfg, "--log-dir", str(tmp_path / "logs"), *extra]) == 0
+    return capsys.readouterr().out
+
+
+def test_up_prints_one_line_when_everything_fits(tmp_path, monkeypatch, capsys):
+    out = run_up_with_fake_start(tmp_path, monkeypatch, capsys)
+    assert "Plan: all 1 services fit on 1 GPUs. Free once they are up: GPU 0: " in out
+    assert "After all services start" not in out
+
+
+def test_up_plan_flag_prints_the_full_plan(tmp_path, monkeypatch, capsys):
+    out = run_up_with_fake_start(tmp_path, monkeypatch, capsys, extra=("--plan",))
+    assert "After all services start" in out and "Plan: all" not in out
+
+
+def test_up_prints_the_full_plan_when_there_is_a_warning(tmp_path, monkeypatch, capsys):
+    # 0.9 of the card leaves less than the 1024 MiB margin free, so the plan has a warning worth reading
+    out = run_up_with_fake_start(tmp_path, monkeypatch, capsys, services="  - {name: svc, port: 8001, gpus: [0], gpu_memory_utilization: 0.95, measured_mib: {0: 23200}, command: 'true'}\n")
+    assert "warning: GPU 0 has only" in out and "Plan: all" not in out
