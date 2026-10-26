@@ -8,6 +8,7 @@
 <p align="center"><b>Know your AI stack fits your GPUs before you start it.</b></p>
 
 <p align="center">
+  <a href="https://pypi.org/project/mesh-deck/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/mesh-deck"></a>
   <img alt="license: MIT" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="python: 3.10+" src="https://img.shields.io/badge/python-3.10%2B-blue">
   <img alt="status: early" src="https://img.shields.io/badge/status-early-orange">
