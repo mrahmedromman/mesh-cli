@@ -1,10 +1,12 @@
 version: 2
 updates:
+  # Only the GitHub Actions used by the workflows. The release workflow can publish to PyPI, so stale actions there
+  # are worth knowing about. Python dependencies are not updated automatically: the minimum versions in
+  # pyproject.toml are chosen on purpose and tested by the `minimum-dependencies` CI job.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
-  - package-ecosystem: pip
-    directory: /
-    schedule:
-      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
