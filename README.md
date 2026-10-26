@@ -22,8 +22,9 @@
   <a href="https://github.com/mrahmedromman/mesh-deck/blob/main/CONTRIBUTING.md">Contributing</a>
 </p>
 
-`mesh` plans and starts a stack of local AI services (vLLM, speech-to-text, embeddings, TTS) on shared GPUs,
-in the right order, with one log file per service.
+`mesh` plans and starts a stack of local AI services on shared GPUs, in the right order, with one log file per
+service. A service is any command that listens on a port: a chat model, speech-to-text, embeddings, text-to-speech,
+or anything else that uses GPU memory.
 
 ```
 $ mesh up models.yaml
@@ -38,13 +39,14 @@ $ mesh up models.yaml
 All services are up. Press Ctrl+C to stop everything.
 ```
 
-> **Early release.** Built and checked on one machine with two RTX 4090s. It reads `nvidia-smi`, so it needs an
-> NVIDIA GPU and a Unix-like system (tested on Linux). Reports from other GPUs are very welcome.
+> **Early release.** Built and checked on one machine with two RTX 4090s, running vLLM services. It reads
+> `nvidia-smi`, so it needs an NVIDIA GPU and a Unix-like system (tested on Linux). Reports from other GPUs and
+> other engines are very welcome.
 
 ## Why
 
-If you run several vLLM or Docker services on one machine, you have probably hit this: the second service
-crashes at startup with *"Free memory on device ... is less than desired GPU memory utilization"*. Each service
+If you run several GPU services on one machine (vLLM is the case this was built for), you have probably hit
+this: the second service crashes at startup with *"Free memory on device ... is less than desired GPU memory utilization"*. Each service
 measures free memory when it starts, and the first one already took its share. Working out fractions that fit,
 starting things in the right order, and finding which log holds the error is tedious to redo by hand.
 
@@ -66,6 +68,15 @@ starting things in the right order, and finding which log holds the error is ted
 - **Helpful errors and Tab completion.** A mistyped command, service name, config field or file gets a "did you
   mean" hint, and `mesh completion bash|zsh|fish` adds Tab completion, including your service names.
 - **Just a YAML file.** No daemon, no proxy, nothing listening on a port.
+
+## Other engines
+
+The start order, health checks, logs, `mesh gpu` and shutdown work for any command. The memory check is built
+around vLLM's `gpu_memory_utilization` fraction. For another engine (llama.cpp, Ollama, TGI, ComfyUI or your own
+script), leave out the fraction and give the service `measured_mib` instead: run `mesh up` once, copy the
+printed "memory it added" numbers, and the planner uses them. Set `health` to a path your engine answers on, since
+the default is `/v1/models`. This has not been tested with engines other than vLLM yet; if you try one, please
+[open an issue](https://github.com/mrahmedromman/mesh-deck/issues) with what worked.
 
 ## Install
 
@@ -187,7 +198,7 @@ All options, `mesh logs` examples, exit codes and where files go: [docs/commands
 
 ## How it works
 
-The driver keeps back some GPU memory, and vLLM measures free memory when each service starts. `mesh` subtracts
+The driver keeps back some GPU memory, and vLLM (the engine this was built around) measures free memory when each service starts. `mesh` subtracts
 the reserved memory and anything other programs are using, then checks each service in order, reducing what is
 free as services start. On two RTX 4090s the planned free memory matched the real `nvidia-smi` numbers to within
 about 20 MiB once real footprints were entered. Details and limits: [docs/how-it-works.md](https://github.com/mrahmedromman/mesh-deck/blob/main/docs/how-it-works.md).

@@ -44,6 +44,16 @@ silently ignored. Service names and ports must be unique.
 A service needs either `gpu_memory_utilization` or `measured_mib` to be planned. With neither, `mesh plan`
 counts its memory as 0 and says so.
 
+## Using an engine other than vLLM
+
+`gpu_memory_utilization` is vLLM's idea of a memory budget. Other engines do not have it, so for them:
+
+- Leave out `gpu_memory_utilization` and set `measured_mib` (see below). Without a fraction, the planner uses your measured numbers as the footprint.
+- Set `health` to a path the engine answers on. The default, `/v1/models`, suits OpenAI-compatible servers.
+- A service with only `measured_mib` gets no "try --gpu-memory-utilization" hint when it does not fit, because there is no fraction to lower.
+
+A measured-only service is planned correctly (checked with `mesh plan`), but no engine other than vLLM has been run end to end yet.
+
 ## Top-level fields
 
 | Field | Meaning |
