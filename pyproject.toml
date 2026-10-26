@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mesh-cli"
+name = "mesh-deck"
 dynamic = ["version"]
 description = "Plan and start multi-service local AI stacks (vLLM, speech-to-text, embeddings) on shared GPUs without OOM surprises."
 readme = "README.md"
@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "AhmedRomman" }]
-keywords = ["mesh-cli", "vllm", "gpu", "llm", "nvidia", "cli", "self-hosted", "inference", "vram", "local-ai"]
+keywords = ["mesh-deck", "vllm", "gpu", "llm", "nvidia", "cli", "self-hosted", "inference", "vram", "local-ai"]
 dependencies = ["pydantic>=2.5", "pyyaml>=6.0.1", "rich>=13"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -32,11 +32,11 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mrahmedromman/mesh-cli"
-Documentation = "https://github.com/mrahmedromman/mesh-cli/tree/main/docs"
-Changelog = "https://github.com/mrahmedromman/mesh-cli/blob/main/CHANGELOG.md"
-Issues = "https://github.com/mrahmedromman/mesh-cli/issues"
-Source = "https://github.com/mrahmedromman/mesh-cli"
+Homepage = "https://github.com/mrahmedromman/mesh-deck"
+Documentation = "https://github.com/mrahmedromman/mesh-deck/tree/main/docs"
+Changelog = "https://github.com/mrahmedromman/mesh-deck/blob/main/CHANGELOG.md"
+Issues = "https://github.com/mrahmedromman/mesh-deck/issues"
+Source = "https://github.com/mrahmedromman/mesh-deck"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10", "types-PyYAML", "build", "twine"]

@@ -1,4 +1,4 @@
-# Contributing to mesh-cli
+# Contributing to mesh-deck
 
 Thanks for helping. This project is small and early, so the most useful contributions are real-world data and
 bug reports. Please read [How it works](docs/how-it-works.md) first, especially "What it does not do", so you
@@ -37,8 +37,8 @@ For a service that fails to start, also include the last lines of its `logs/NAME
 ## Development setup
 
 ```bash
-git clone https://github.com/mrahmedromman/mesh-cli.git
-cd mesh-cli
+git clone https://github.com/mrahmedromman/mesh-deck.git
+cd mesh-deck
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"

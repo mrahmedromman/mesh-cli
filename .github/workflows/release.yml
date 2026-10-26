@@ -3,8 +3,8 @@ name: release
 # Publishes to PyPI when a GitHub release is published. Uses PyPI Trusted Publishing (OpenID Connect), so no API
 # token is stored in this repository.
 #
-# One-time setup on PyPI: Account > Publishing > add a pending publisher for project "mesh-cli", owner
-# "mrahmedromman", repository "mesh-cli", workflow "release.yml", environment "pypi". Do the same on test.pypi.org
+# One-time setup on PyPI: Account > Publishing > add a pending publisher for project "mesh-deck", owner
+# "mrahmedromman", repository "mesh-deck", workflow "release.yml", environment "pypi". Do the same on test.pypi.org
 # with environment "testpypi" to use the dry run below. Create both environments under Settings > Environments.
 #
 # Dry run: Actions > release > Run workflow builds the package and uploads it to TestPyPI only.

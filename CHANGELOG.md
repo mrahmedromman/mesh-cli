@@ -10,7 +10,7 @@ Nothing yet.
 
 ## [0.1.0] - 2026-10-26
 
-First public release.
+First public release, published on PyPI as `mesh-deck` (the command is `mesh`).
 
 ### Added
 - `mesh gpu`: shows each GPU's memory and utilization and who is holding the memory.
