@@ -129,6 +129,24 @@ def test_failed_start_also_reports_the_cleanup(tmp_path):
     assert "  stopped a" in lines and lines[-1].startswith("All 2 services stopped")
 
 
+def wait_for(condition, timeout=15.0):
+    """Wait until something is true, instead of sleeping a fixed time that a slow machine can overrun."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline, "timed out waiting"
+        time.sleep(0.02)
+
+
+def start_stubborn(tmp_path):
+    """A process that ignores SIGTERM. Returns once it has really installed the trap."""
+    ready = tmp_path / f"ready-{len(list(tmp_path.glob('ready-*')))}"
+    proc = start_group(f"trap '' TERM; touch {ready}; exec sleep 60")
+    wait_for(ready.exists)
+    return proc
+
+
 def start_group(command):
     import subprocess
 
@@ -144,20 +162,14 @@ def test_stop_process_results(tmp_path):
     polite = start_group("exec sleep 60")
     assert runner.stop_process(polite.pid, grace=5, proc=polite) == "stopped"
 
-    stubborn = start_group("trap '' TERM; exec sleep 60")  # ignores SIGTERM, so it needs SIGKILL
-    import time
-
-    time.sleep(0.3)
+    stubborn = start_stubborn(tmp_path)  # ignores SIGTERM, so it needs SIGKILL
     assert runner.stop_process(stubborn.pid, grace=1, proc=stubborn) == "killed"
 
 
 def test_stop_all_says_when_a_service_was_force_killed_or_already_gone(tmp_path):
     gone = start_group("true")
     gone.wait()
-    stubborn = start_group("trap '' TERM; exec sleep 60")
-    import time
-
-    time.sleep(0.3)
+    stubborn = start_stubborn(tmp_path)
     lines = []
     stuck = runner.stop_all([("old", gone.pid, None, gone), ("stubborn", stubborn.pid, None, stubborn)], 1, lines.append)
     assert stuck == 0
@@ -265,7 +277,7 @@ def test_a_second_ctrl_c_during_shutdown_does_not_abort_the_cleanup(tmp_path):
     cfg = tmp_path / "models.yaml"
     cfg.write_text(
         "services:\n"
-        f"  - {{name: a, port: {port}, gpus: [0], health: /, stop: 'sleep 1', "
+        f"  - {{name: a, port: {port}, gpus: [0], health: /, stop: 'touch {tmp_path}/stopping; sleep 1', "
         f"command: 'exec {sys.executable} -m http.server {port} --bind 127.0.0.1 --directory {tmp_path}'}}\n"
     )
     log_dir = tmp_path / "logs"
@@ -280,7 +292,7 @@ def test_a_second_ctrl_c_during_shutdown_does_not_abort_the_cleanup(tmp_path):
             time.sleep(0.2)
         assert runner.probe(port, "/") == 200
         up.send_signal(signal.SIGINT)
-        time.sleep(0.4)  # the stop command takes a second, so cleanup is under way
+        wait_for((tmp_path / "stopping").exists)  # the stop command has started, so cleanup is under way (it takes a second)
         up.send_signal(signal.SIGINT)
         up.send_signal(signal.SIGTERM)
         assert up.wait(timeout=30) == 0
