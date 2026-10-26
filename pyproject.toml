@@ -12,14 +12,16 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "AhmedRomman" }]
 keywords = ["mesh-cli", "vllm", "gpu", "llm", "nvidia", "cli", "self-hosted", "inference", "vram", "local-ai"]
-dependencies = ["pydantic>=2.5", "pyyaml>=6", "rich>=13"]
+dependencies = ["pydantic>=2.5", "pyyaml>=6.0.1", "rich>=13"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Environment :: GPU :: NVIDIA CUDA",
     "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
