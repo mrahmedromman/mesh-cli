@@ -138,6 +138,39 @@ like this (illustrative numbers):
 The first time, run `mesh up` once and copy the printed "memory it added" numbers into `measured_mib`. The
 planner is most accurate with measured numbers. See [Config](https://github.com/mrahmedromman/mesh-deck/blob/main/docs/config.md#getting-real-numbers-for-measured_mib).
 
+### Try it without a GPU
+
+`mesh plan` can read saved `nvidia-smi` output, so you can see what it does on any machine. Create two small files
+(a pretend pair of 24 GB cards, and three services):
+
+```bash
+cat > gpus.csv <<'EOF'
+index, uuid, name, memory.total [MiB], memory.used [MiB], memory.free [MiB]
+0, GPU-00000000-0000-0000-0000-000000000000, NVIDIA GeForce RTX 4090, 24564 MiB, 417 MiB, 23662 MiB
+1, GPU-00000000-0000-0000-0000-000000000001, NVIDIA GeForce RTX 4090, 24564 MiB, 4 MiB, 24078 MiB
+EOF
+
+cat > models.yaml <<'EOF'
+services:
+  - {name: chat,       port: 8001, gpus: [0], gpu_memory_utilization: 0.70, command: "echo chat"}
+  - {name: embeddings, port: 8003, gpus: [0], gpu_memory_utilization: 0.30, command: "echo embeddings"}
+  - {name: speech,     port: 8004, gpus: [1], gpu_memory_utilization: 0.30, command: "echo speech"}
+EOF
+
+mesh plan models.yaml --gpus-csv gpus.csv --external 0=417,1=4
+```
+
+The `embeddings` service does not fit next to `chat` on GPU 0, and the plan says how to fix it:
+
+```
+2. embeddings   FAIL
+     GPU 0: needs 7224 MiB free but only 6806 MiB is free
+     try --gpu-memory-utilization 0.28 or less
+```
+
+Change `embeddings` to `0.28` and run it again: it fits, with a warning that GPU 0 would have only 63 MiB to
+spare. Nothing was started, and no GPU was needed.
+
 ## Commands
 
 | Command | What it does |
