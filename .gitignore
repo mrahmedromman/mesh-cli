@@ -10,3 +10,5 @@ logs/
 .claude/
 reddit threads/
 local/
+/*.png
+/Screenshot*

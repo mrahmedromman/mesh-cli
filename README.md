@@ -37,7 +37,7 @@ $ mesh up models.yaml
 All services are up. Press Ctrl+C to stop everything.
 ```
 
-> **Early (0.0.1).** Built and checked on one machine with two RTX 4090s. It reads `nvidia-smi`, so it needs an
+> **Early release.** Built and checked on one machine with two RTX 4090s. It reads `nvidia-smi`, so it needs an
 > NVIDIA GPU and a Unix-like system (tested on Linux). Reports from other GPUs are very welcome.
 
 ## Why

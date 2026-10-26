@@ -38,6 +38,21 @@ jobs:
       - name: Mypy
         run: mypy
 
+  # The oldest versions of the dependencies we claim to support, on the oldest Python.
+  minimum-dependencies:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Install the declared minimum versions
+        run: |
+          pip install "pydantic==2.5.0" "pyyaml==6.0.1" "rich==13.0.0" pytest
+          pip install -e . --no-deps
+      - name: Run tests
+        run: pytest -q
+
   # Builds the package the way a release would, checks it, installs it and runs the command.
   package:
     runs-on: ubuntu-24.04
