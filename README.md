@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-    <img alt="mesh-cli" src="docs/assets/logo-light.svg" width="320">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mrahmedromman/mesh-cli/main/docs/assets/logo-dark.svg">
+    <img alt="mesh-cli" src="https://raw.githubusercontent.com/mrahmedromman/mesh-cli/main/docs/assets/logo-light.svg" width="320">
   </picture>
 </p>
 
@@ -15,10 +15,10 @@
 
 <p align="center">
   <a href="#quickstart">Quickstart</a> ·
-  <a href="docs/commands.md">Commands</a> ·
-  <a href="docs/config.md">Config</a> ·
-  <a href="docs/how-it-works.md">How it works</a> ·
-  <a href="CONTRIBUTING.md">Contributing</a>
+  <a href="https://github.com/mrahmedromman/mesh-cli/blob/main/docs/commands.md">Commands</a> ·
+  <a href="https://github.com/mrahmedromman/mesh-cli/blob/main/docs/config.md">Config</a> ·
+  <a href="https://github.com/mrahmedromman/mesh-cli/blob/main/docs/how-it-works.md">How it works</a> ·
+  <a href="https://github.com/mrahmedromman/mesh-cli/blob/main/CONTRIBUTING.md">Contributing</a>
 </p>
 
 `mesh` plans and starts a stack of local AI services (vLLM, speech-to-text, embeddings, TTS) on shared GPUs,
@@ -68,18 +68,21 @@ starting things in the right order, and finding which log holds the error is ted
 
 ## Install
 
-A PyPI release is planned. Until then, install from source (use a separate environment from the one that
-runs your models; `mesh` needs only `pydantic`, `pyyaml` and `rich`):
+Use a separate environment from the one that runs your models; `mesh` needs only `pydantic`, `pyyaml` and `rich`.
 
 ```bash
-git clone https://github.com/mrahmedromman/mesh-cli.git
-cd mesh-cli
-pipx install .            # or: pip install .
+pipx install mesh-cli     # or: pip install mesh-cli
+```
+
+To run the latest unreleased code instead:
+
+```bash
+pipx install git+https://github.com/mrahmedromman/mesh-cli.git
 ```
 
 ## Quickstart
 
-1. Write a `models.yaml` (see [examples/](examples/) for complete ones):
+1. Write a `models.yaml` (see [examples/](https://github.com/mrahmedromman/mesh-cli/tree/main/examples/) for complete ones):
 
    ```yaml
    services:
@@ -132,7 +135,7 @@ like this (illustrative numbers):
 ```
 
 The first time, run `mesh up` once and copy the printed "memory it added" numbers into `measured_mib`. The
-planner is most accurate with measured numbers. See [Config](docs/config.md#getting-real-numbers-for-measured_mib).
+planner is most accurate with measured numbers. See [Config](https://github.com/mrahmedromman/mesh-cli/blob/main/docs/config.md#getting-real-numbers-for-measured_mib).
 
 ## Commands
 
@@ -146,14 +149,14 @@ planner is most accurate with measured numbers. See [Config](docs/config.md#gett
 | `mesh gpu` | Shows each GPU's memory and utilization, and who is holding the memory. |
 | `mesh completion SHELL` | Prints a Tab-completion script for `bash`, `zsh` or `fish`. |
 
-All options, `mesh logs` examples, exit codes and where files go: [docs/commands.md](docs/commands.md).
+All options, `mesh logs` examples, exit codes and where files go: [docs/commands.md](https://github.com/mrahmedromman/mesh-cli/blob/main/docs/commands.md).
 
 ## How it works
 
 The driver keeps back some GPU memory, and vLLM measures free memory when each service starts. `mesh` subtracts
 the reserved memory and anything other programs are using, then checks each service in order, reducing what is
 free as services start. On two RTX 4090s the planned free memory matched the real `nvidia-smi` numbers to within
-about 20 MiB once real footprints were entered. Details and limits: [docs/how-it-works.md](docs/how-it-works.md).
+about 20 MiB once real footprints were entered. Details and limits: [docs/how-it-works.md](https://github.com/mrahmedromman/mesh-cli/blob/main/docs/how-it-works.md).
 
 ## Compared with
 
@@ -185,9 +188,9 @@ configs you trust. `mesh` itself sends nothing anywhere: it runs `nvidia-smi`, s
 
 Tests need no GPU: `pip install -e ".[dev]"` then `pytest`. The most useful contribution is real `nvidia-smi`
 output from a GPU other than an RTX 4090, added as a test fixture. Bug reports and ideas are welcome as issues.
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the exact commands, what to include in a bug report, and what is in
+See [CONTRIBUTING.md](https://github.com/mrahmedromman/mesh-cli/blob/main/CONTRIBUTING.md) for the exact commands, what to include in a bug report, and what is in
 scope.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/mrahmedromman/mesh-cli/blob/main/LICENSE)
