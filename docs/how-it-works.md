@@ -54,16 +54,18 @@ Behaviour on other GPUs, drivers and vLLM versions is not yet known. See
    `--plan`, or when the plan has a warning or note). If a service will not fit it stops, unless `--force` is
    given. Without `nvidia-smi` it skips the plan and the memory numbers and says so.
 2. Refuses to start if a previous stack from this log directory is still running (run `mesh down` first).
-3. Starts services one at a time, in the order listed. Each runs as `bash -c <command>` in its own process group.
-4. After starting a service it polls the `health` path until **any** HTTP response arrives, or the service
-   exits, or `start_timeout_s` passes.
-5. When a service is healthy it prints how much GPU memory it added.
-6. If a service exits or times out before it is healthy, it prints that service's last 20 log lines, stops every
+3. Refuses to start if another program is already listening on any service's port, and names the port.
+4. Starts services one at a time, in the order listed. Each runs as `bash -c <command>` in its own process group.
+5. After starting a service it polls the `health` path until it answers with a status below 500 (a `503` while a
+   model loads means "not ready yet"), or the service exits, or `start_timeout_s` passes.
+6. When a service is healthy it prints how much GPU memory it added.
+7. If a service exits or times out before it is healthy, it prints that service's last 20 log lines, stops every
    service already started, and exits with code 1.
-7. When all are up it waits. If a service dies later, it prints a warning with the log path and leaves the
-   others running; it does not restart it.
-8. On Ctrl+C, SIGTERM, or `mesh down`, it stops services in reverse order: first the service's `stop` command if
-   it has one, then SIGTERM to its process group, waiting up to 30 seconds, then SIGKILL. It prints a line as
+8. When all are up it waits. If a service dies later, it prints a warning with the log path, stops what is left
+   of its process group, and leaves the others running; it does not restart it.
+9. On Ctrl+C, SIGTERM, or `mesh down`, it stops services in reverse order: first the service's `stop` command if
+   it has one, then SIGTERM to its process group, waiting up to the service's
+   [`stop_timeout_s`](config.md#stopping-a-service) (30 seconds by default), then SIGKILL. It prints a line as
    each service stops and a final "All N services stopped." (see
    [Shutdown messages](commands.md#shutdown-messages)).
 

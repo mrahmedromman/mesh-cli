@@ -35,7 +35,7 @@ silently ignored. Service names and ports must be unique.
 | `gpu_memory_utilization` | no | vLLM-style fraction (above 0, up to 1) of each GPU. Used to check the service can start. |
 | `measured_mib` | no | Memory the service really held on each GPU, e.g. `{0: 16252, 1: 16252}`. The best source of truth. |
 | `overhead_mib` | no | Extra memory beyond the fraction, used only for a GPU with no `measured_mib`. Default 0. |
-| `health` | no | Path polled until the service answers. Default `/v1/models`. Any HTTP response counts as alive. |
+| `health` | no | Path polled until the service answers. Default `/v1/models`. An answer below 500 counts as alive; a 5xx means not ready yet (see [Health paths](#health-paths)). |
 | `start_timeout_s` | no | Seconds to wait for the health check. Default 900. |
 | `stop_timeout_s` | no | Seconds the service gets to stop once it is asked to, before it is killed. Default 30. Raise it for a model that needs longer to shut down and release its GPU memory. See [Stopping a service](#stopping-a-service). |
 

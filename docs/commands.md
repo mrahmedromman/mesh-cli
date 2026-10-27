@@ -137,7 +137,7 @@ A failed service also gets a line under the table with the reason, and a pointer
 stack stops while you are watching, the last table stays on screen with the services shown as stopped.
 
 When the output or the input is not a terminal (a pipe, a script, CI), `mesh status` prints the table once and
-exits, so it never waits for a key.
+exits, so it never waits for a key. With no stack running it prints `nothing running` and exits with code 0.
 
 `mesh down`, run from another terminal, asks the `mesh up` process to shut down gracefully, so the result is the
 same as pressing Ctrl+C there. If that process is gone, it stops each recorded service itself.
@@ -248,7 +248,7 @@ there, on your own computer:
   `mesh logs` read it. It is removed when the stack stops.
 
 `state.json` holds each service's full command, which can contain tokens, and logs can hold prompts and paths. So
-`mesh` creates its folder readable only by you (mode `700`) and writes the files with mode `600`. A folder that
+`mesh` creates the folder it uses readable only by you (mode `700`; folders above it keep the system default) and writes the files with mode `600`. A folder that
 already exists, such as one you made yourself, keeps its permissions, and a log written by an older version is
 tightened the next time `mesh up` starts that service.
 
