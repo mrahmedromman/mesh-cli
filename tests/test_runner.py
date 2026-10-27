@@ -469,3 +469,94 @@ def test_a_starting_service_shows_as_running_as_soon_as_it_answers(sleeper):
     state = {"services": {"a": {"status": "starting", "pid": sleeper.pid, "port": 1, "health": "/"}}}
     assert runner.service_rows(state, probe_fn=fake_probe(200))[0].state == "running"
     assert runner.service_rows(state, probe_fn=fake_probe(None))[0].state == "starting"
+
+
+# --- a leftover state file must never make mesh touch a program it did not start ---------------------------------------
+
+STRANGER = "someone-else:1"  # what the recorded identity looks like once a pid belongs to another process
+
+
+def test_a_live_process_has_a_start_stamp_and_a_missing_one_has_none(sleeper):
+    stamp = runner.process_start(sleeper.pid)
+    assert stamp and stamp == runner.process_start(sleeper.pid)  # the same process gives the same stamp every time
+    assert runner.process_start(2_000_000_000) is None
+
+
+def test_is_ours_is_false_only_when_the_pid_clearly_belongs_to_another_process(sleeper):
+    stamp = runner.process_start(sleeper.pid)
+    assert runner.is_ours(sleeper.pid, stamp)
+    assert runner.is_ours(sleeper.pid, None)  # a state file from 0.1.0 recorded no stamp
+    assert not runner.is_ours(sleeper.pid, STRANGER)
+    assert runner.is_ours(2_000_000_000, STRANGER)  # nothing there: the group, if any, is still ours
+
+
+def test_up_records_who_it_started(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path)])
+    seen = {}
+
+    def hold():  # while the service is still running, so its stamp can be read
+        state = runner.read_state(tmp_path / "logs")
+        seen["state"] = state
+        seen["service_now"] = runner.process_start(state["services"]["a"]["pid"])
+        return False
+
+    runner.run_up(config, tmp_path / "logs", hold=hold, out=lambda _: None, health_interval=0.2, grace=5)
+    state = seen["state"]
+    assert state["controller_started"] == runner.process_start(os.getpid())
+    assert state["services"]["a"]["started"] and state["services"]["a"]["started"] == seen["service_now"]
+
+
+def test_a_pid_taken_over_by_another_program_is_not_a_running_service(tmp_path, sleeper):
+    runner.write_state(tmp_path, {"controller_pid": 999999, "services": {
+        "llm": {"status": "running", "pid": sleeper.pid, "started": STRANGER, "port": 1, "health": "/"}}})
+    assert runner.running_services(tmp_path) == []  # so `mesh up` is not refused for no reason
+    [row] = runner.service_rows(runner.read_state(tmp_path), probe_fn=fake_probe())
+    assert row.state == "failed" and row.health == "-"
+
+
+def test_mesh_down_leaves_a_program_that_took_over_a_recorded_pid_alone(tmp_path, sleeper):
+    runner.write_state(tmp_path, {"controller_pid": 999999, "services": {
+        "llm": {"status": "running", "pid": sleeper.pid, "started": STRANGER, "port": 1, "health": "/"}}})
+    lines = []
+    assert runner.stop_from_state(tmp_path, out=lines.append, grace=1) is True
+    assert sleeper.poll() is None  # not signalled
+    assert "  llm was already stopped" in lines and lines[-1] == "All services stopped."
+    assert runner.read_state(tmp_path) is None
+
+
+def test_mesh_down_does_not_signal_a_program_that_took_over_mesh_ups_pid(tmp_path, sleeper):
+    runner.write_state(tmp_path, {"controller_pid": sleeper.pid, "controller_started": STRANGER, "services": {
+        "llm": {"status": "running", "pid": 2_000_000_000, "port": 1, "health": "/"}}})
+    assert runner.stop_from_state(tmp_path, out=lambda _: None, grace=1, wait=1) is True
+    assert sleeper.poll() is None
+    assert runner.read_state(tmp_path) is None
+
+
+def test_the_stop_command_still_runs_for_a_service_whose_pid_was_taken_over(tmp_path, sleeper):
+    marker = tmp_path / "stopped"
+    runner.write_state(tmp_path, {"controller_pid": 999999, "services": {
+        "llm": {"status": "running", "pid": sleeper.pid, "started": STRANGER, "port": 1, "health": "/",
+                "stop": f"touch {marker}"}}})  # e.g. `docker stop NAME`: the container may well still be running
+    runner.stop_from_state(tmp_path, out=lambda _: None, grace=1)
+    assert marker.exists() and sleeper.poll() is None
+
+
+def test_a_genuine_orphan_is_still_stopped(tmp_path):
+    orphan = start_group("exec sleep 60")
+    threading.Thread(target=orphan.wait, daemon=True).start()
+    runner.write_state(tmp_path, {"controller_pid": 999999, "services": {
+        "llm": {"status": "running", "pid": orphan.pid, "started": runner.process_start(orphan.pid), "port": 1, "health": "/"}}})
+    assert runner.stop_from_state(tmp_path, out=lambda _: None, grace=5) is True
+    assert not runner.group_alive(orphan.pid)
+
+
+def test_the_linux_stamp_reads_the_start_time_even_when_the_command_name_has_spaces_and_parentheses():
+    # a real /proc/PID/stat line (field 22, the start time, is 987654); the name is "my (odd) prog"
+    stat = "1234 (my (odd) prog) S 1 1234 1234 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 987654 12345678 900 18446744073709551615"
+    assert runner.linux_stamp("3f2a-boot\n", stat) == "3f2a-boot:987654"
+    assert runner.linux_stamp("other-boot", stat) != runner.linux_stamp("3f2a-boot", stat)  # a reboot changes the stamp
+
+
+def test_a_short_or_damaged_stat_line_is_not_a_stamp():
+    with pytest.raises(IndexError):
+        runner.linux_stamp("boot", "1234 (x) S 1")

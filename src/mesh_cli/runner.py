@@ -73,6 +73,53 @@ def probe(port: int, path: str, timeout: float = 3.0) -> int | None:
         return None
 
 
+def linux_stamp(boot_id: str, stat: str) -> str:
+    """The boot id and field 22 (start time in ticks since boot) of a /proc/PID/stat line.
+
+    The command name is in parentheses and may contain spaces or parentheses, so the fields are counted after the
+    last ")". Field 3 is the first one there, which puts field 22 at index 19.
+    """
+    return f"{boot_id.strip()}:{stat.rsplit(')', 1)[1].split()[19]}"
+
+
+def process_start(pid: int) -> str | None:
+    """A stamp for when a process began, or None if there is no such process.
+
+    A pid can be handed to a different program after a crash or a reboot, so the state file records this stamp
+    next to each pid, and mesh only trusts a pid whose stamp still matches. On Linux it is the boot id and the
+    start time in ticks since boot, which neither a reboot nor a clock change can repeat. Elsewhere it is the start
+    time from `ps`, in UTC so that the shell's time zone cannot change it.
+    """
+    try:
+        return linux_stamp(Path("/proc/sys/kernel/random/boot_id").read_text(), Path(f"/proc/{pid}/stat").read_text())
+    except (OSError, IndexError):
+        pass
+    try:
+        result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
+                                env={**os.environ, "TZ": "UTC", "LC_ALL": "C"})
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() or None
+
+
+def is_ours(pid: int, started: str | None) -> bool:
+    """False only when `pid` now clearly belongs to a different process than the one recorded.
+
+    If the process is gone, or nothing was recorded (a state file from 0.1.0), it is treated as ours: while a process
+    group still has members its id cannot be given to anyone else.
+    """
+    if not started:
+        return True
+    now = process_start(pid)
+    return now is None or now == started
+
+
+def still_ours(info: dict) -> bool:
+    """True if the process group recorded for a service exists and is the one mesh started."""
+    pid = info.get("pid") or 0
+    return pid > 0 and group_alive(pid) and is_ours(pid, info.get("started"))
+
+
 def is_up(code: int | None) -> bool:
     """Whether a health probe's answer means the service is up. Any HTTP response does, because the server is listening."""
     return code is not None
@@ -127,7 +174,7 @@ def known_services(log_dir: Path) -> list[str]:
 
 def running_services(log_dir: Path) -> list[str]:
     state = read_state(log_dir) or {}
-    return [name for name, info in state.get("services", {}).items() if info.get("pid") and group_alive(info["pid"])]
+    return [name for name, info in state.get("services", {}).items() if still_ours(info)]
 
 
 @dataclass(frozen=True)
@@ -148,7 +195,7 @@ def service_rows(state: dict, probe_fn: Callable[..., int | None] = probe) -> li
     The health checks run at the same time with a short timeout, so a few silent services cannot freeze the screen.
     """
     entries = list(state.get("services", {}).items())
-    alive = {name: bool(info.get("pid")) and group_alive(info["pid"]) for name, info in entries}
+    alive = {name: still_ours(info) for name, info in entries}
     with ThreadPoolExecutor(max_workers=max(1, len(entries))) as pool:
         codes = {name: pool.submit(probe_fn, info["port"], info["health"], 1.0) for name, info in entries if alive[name]}
     rows = []
@@ -237,7 +284,7 @@ def stop_process(pid: int, stop_command: str | None = None, grace: float = 30.0,
             proc.poll()  # reap the child so the group can disappear
         return not group_alive(pid)
 
-    if gone():
+    if not pid or gone():  # pid 0: what was recorded is gone or now belongs to another program; signal nothing
         return "gone"
     try:
         os.killpg(pid, signal.SIGTERM)
@@ -294,7 +341,7 @@ def stop_all(
             out(f"  stopped {name}" + (f" ({seconds:.0f}s)" if seconds >= 1 else ""))
         if result == "denied":
             stuck += 1
-        elif group_alive(pid):
+        elif pid and group_alive(pid):
             stuck += 1
             out(f"  warning: {name} is still running (pid {pid})")
     out(f"{stuck} of {_count(total)} could not be stopped." if stuck else _all_stopped(total))
@@ -345,6 +392,7 @@ def run_up(
     started: list[tuple[Service, subprocess.Popen]] = []
     state: dict = {
         "controller_pid": os.getpid(),
+        "controller_started": process_start(os.getpid()),
         "services": {  # every service is listed from the start, in start order; pid is set once it has a process
             svc.name: {"status": "pending", "pid": None, "port": svc.port, "health": svc.health, "stop": svc.stop,
                        "command": svc.command, "log": str(log_path(log_dir, svc.name)), "error": None}
@@ -363,7 +411,7 @@ def run_up(
             out(f"[{number}/{total}] starting {svc.name} on port {svc.port}  (log: {tidy(file)})")
             proc = start_service(svc, log_dir)
             started.append((svc, proc))
-            mark(log_dir, state, svc.name, status="starting", pid=proc.pid)
+            mark(log_dir, state, svc.name, status="starting", pid=proc.pid, started=process_start(proc.pid))
             on_wait: Callable[[float, str], None] | None = None
             if progress is not None:
                 on_wait = functools.partial(_report, progress, svc.name)
@@ -429,7 +477,9 @@ def stop_from_state(
         return False
     services = [(name, info) for name, info in state.get("services", {}).items() if info.get("pid")]  # in start order
     controller = state.get("controller_pid") or 0
-    controller_alive = controller not in (0, os.getpid()) and pid_alive(controller)
+    controller_alive = (
+        controller not in (0, os.getpid()) and pid_alive(controller) and is_ours(controller, state.get("controller_started"))
+    )
     if not services and not controller_alive:  # nothing was ever started, so there is nothing to stop
         clear_state(log_dir)
         return False
@@ -455,6 +505,8 @@ def stop_from_state(
                 time.sleep(poll)
             out("mesh up did not finish in time; stopping the remaining services directly.")
             services = [(name, info) for name, info in services if name in remaining]
-    stop_all([(name, info["pid"], info.get("stop"), None) for name, info in reversed(services)], grace, out)
+    # A pid that now belongs to another program is passed as 0, so only its stop command (e.g. `docker stop NAME`) runs.
+    stop_all([(name, info["pid"] if is_ours(info["pid"], info.get("started")) else 0, info.get("stop"), None)
+              for name, info in reversed(services)], grace, out)
     clear_state(log_dir)
     return True

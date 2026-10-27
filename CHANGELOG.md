@@ -13,6 +13,10 @@ All notable changes to this project are recorded here. The format follows
 - `state.json` now lists all services from the start and records each one's status.
 
 ### Fixed
+- A leftover `state.json` (after a crash, `kill -9` or a reboot) could make `mesh down` stop an unrelated program
+  that had been given the same process id, and could make `mesh up` refuse to start. `mesh` now records when each
+  process began and only trusts a process id whose start time still matches. A service that is still running
+  after `mesh up` was killed is still found and stopped. Programs that took over an id are left alone.
 - `mesh plan` and `mesh up` said a service fitted when it could start but would hold more memory than was free
   (its `overhead_mib` or `measured_mib` pushed the GPU below zero). The plan now reports it as not fitting, and
   the suggested `--gpu-memory-utilization` allows for the overhead. When no smaller fraction can help (a

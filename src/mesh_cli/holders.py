@@ -177,7 +177,7 @@ def services_from_state(state: dict | None) -> dict[str, ServiceInfo]:
     return {
         name: ServiceInfo(int(info["pid"]), info.get("command") or "", info.get("stop") or "")
         for name, info in services.items()
-        if info.get("pid")  # a service that has not started yet has no process
+        if info.get("pid") and runner.is_ours(info["pid"], info.get("started"))  # not yet started, or the pid is now another program's
     }
 
 
