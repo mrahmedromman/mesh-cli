@@ -110,3 +110,16 @@ def test_paths_under_the_home_folder_are_shown_with_a_tilde(tmp_path, monkeypatc
     monkeypatch.setenv("HOME", str(tmp_path))
     assert settings.tidy(tmp_path / "mesh-deck" / "llm.log") == "~/mesh-deck/llm.log"
     assert settings.tidy(Path("/srv/other/llm.log")) == "/srv/other/llm.log"
+
+
+def test_a_folder_created_by_the_first_run_question_is_private(tmp_path, monkeypatch):
+    import os
+    import stat
+
+    old = os.umask(0)
+    try:
+        answer(monkeypatch, str(tmp_path / "deck"))
+        folder = settings.log_dir(None, ask=True)
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(os.stat(folder).st_mode) == 0o700

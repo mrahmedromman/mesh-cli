@@ -232,6 +232,11 @@ there, on your own computer:
 - `state.json`: which services are running, their process ids and ports. `mesh status`, `mesh down` and
   `mesh logs` read it. It is removed when the stack stops.
 
+`state.json` holds each service's full command, which can contain tokens, and logs can hold prompts and paths. So
+`mesh` creates its folder readable only by you (mode `700`) and writes the files with mode `600`. A folder that
+already exists, such as one you made yourself, keeps its permissions, and a log written by an older version is
+tightened the next time `mesh up` starts that service.
+
 `--log-dir FOLDER` uses a different folder for that command instead (give it to every command of the stack).
 Delete the settings file to be asked again. When output is not a terminal (a script or CI), `mesh` never asks:
 it uses the remembered folder, or `logs` in the current directory if nothing is saved. If your folder is inside a
