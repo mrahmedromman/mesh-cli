@@ -13,10 +13,11 @@ import sys
 import threading
 
 from rich import box
-from rich.console import Console, JustifyMethod
+from rich.console import Console, Group, JustifyMethod
 from rich.table import Table
 from rich.text import Text
 
+from . import runner
 from .holders import GpuReport
 from .planner import GpuBudget, Plan
 
@@ -172,16 +173,35 @@ def print_holders(reports: list[GpuReport], con: Console | None = None) -> None:
         con.print()
 
 
-def print_status(rows: list[tuple[str, bool, int, int, str]], con: Console | None = None) -> None:
-    """rows: (name, running, pid, port, health text)."""
-    con = con or console()
+STATE_STYLE = {
+    "pending": ("○", "dim"),
+    "starting": ("◐", "yellow"),
+    "running": ("●", "green"),
+    "failed": ("✗", "bold red"),
+    "stopping": ("◐", "yellow"),
+}
+
+
+def status_view(rows: list[runner.ServiceRow]) -> Group:
+    """The status table, then one line under it for each service that failed and why."""
     table = Table(box=box.SIMPLE_HEAD, pad_edge=False)
     _columns(table, (("Service", "left"), ("State", "left"), ("PID", "right"), ("Port", "right"), ("Health", "left")))
-    for name, running, pid, port, health in rows:
-        state = Text("● running", style="green") if running else Text("○ stopped", style="red")
-        answering = running and not health.startswith("not")
-        table.add_row(name, state, str(pid), str(port), Text(health, style="green" if answering else "red" if running else "dim"))
-    con.print(table)
+    for row in rows:
+        mark, style = STATE_STYLE.get(row.state, ("?", ""))
+        answering = row.health.startswith("HTTP")
+        table.add_row(
+            row.name,
+            Text(f"{mark} {row.state}", style=style),
+            str(row.pid) if row.pid else "-",
+            str(row.port),
+            Text(row.health, style="green" if answering else "dim" if row.health == "-" else "red"),
+        )
+    notes = [Text(f"  {r.name}: {r.error}  (see: mesh logs {r.name})", style="red") for r in rows if r.error]
+    return Group(table, *notes)
+
+
+def print_status(rows: list[runner.ServiceRow], con: Console | None = None) -> None:
+    (con or console()).print(status_view(rows))
 
 
 class StartupDisplay:

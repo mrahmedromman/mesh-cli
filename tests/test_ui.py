@@ -105,11 +105,21 @@ def test_holders_view_for_an_idle_gpu():
     assert "nothing is using this GPU's memory" in text_of(con)
 
 
-def test_status_view_marks_running_and_stopped():
+def test_status_view_lists_every_service_with_its_state():
     con = recording()
-    ui.print_status([("llm", True, 100, 8001, "HTTP 200"), ("tts", True, 101, 8005, "not answering"), ("old", False, 102, 8003, "not answering")], con)
+    ui.print_status([
+        runner.ServiceRow("llm", "running", 100, 8001, "HTTP 200"),
+        runner.ServiceRow("stt", "starting", 101, 8004, "not answering"),
+        runner.ServiceRow("tts", "pending", None, 8005, "-"),
+        runner.ServiceRow("emb", "failed", None, 8003, "-", "emb exited with status 3"),
+    ], con)
     out = text_of(con)
-    assert "● running" in out and "○ stopped" in out and "HTTP 200" in out
+    assert "● running" in out and "◐ starting" in out and "○ pending" in out and "✗ failed" in out
+    assert "HTTP 200" in out and "not answering" in out
+    assert out.index("llm") < out.index("stt") < out.index("tts") < out.index("emb")  # start order
+    assert "emb: emb exited with status 3  (see: mesh logs emb)" in out
+    tts_line = next(line for line in out.splitlines() if "tts" in line)
+    assert " - " in tts_line  # no process yet, so a dash instead of a pid
 
 
 def test_startup_display_shows_one_live_line_and_clears_it():
