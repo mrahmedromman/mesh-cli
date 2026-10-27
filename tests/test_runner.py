@@ -560,3 +560,106 @@ def test_the_linux_stamp_reads_the_start_time_even_when_the_command_name_has_spa
 def test_a_short_or_damaged_stat_line_is_not_a_stamp():
     with pytest.raises(IndexError):
         runner.linux_stamp("boot", "1234 (x) S 1")
+
+
+# --- what counts as "up" ----------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("code", [200, 204, 301, 401, 404, 405])
+def test_a_response_below_500_means_the_server_is_up(code):
+    assert runner.is_up(code)
+
+
+@pytest.mark.parametrize("code", [None, 500, 502, 503])
+def test_no_answer_or_a_server_error_means_not_ready_yet(code):
+    assert not runner.is_up(code)  # 503 is what servers answer while a model is still loading
+
+
+def wait_with_answers(answers, timeout_s=100):
+    """Run wait_healthy against a scripted series of probe answers, with a fake clock."""
+    svc = Service(name="s", port=1, gpus=[0], start_timeout_s=timeout_s, health="/health")
+    now, seen = [0.0], []
+    replies = iter(answers)
+
+    def probe_fn(port, path):
+        seen.append(now[0])
+        return next(replies, answers[-1])
+
+    class Alive:
+        def poll(self):
+            return None
+
+    runner.wait_healthy(svc, Alive(), Path("s.log"), interval=5, probe_fn=probe_fn, clock=lambda: now[0],
+                        sleep=lambda s: now.__setitem__(0, now[0] + s))
+    return seen
+
+
+def test_wait_healthy_keeps_waiting_through_503_until_the_server_is_ready():
+    assert wait_with_answers([None, 503, 503, 200]) == [0.0, 5.0, 10.0, 15.0]
+
+
+def test_a_service_that_only_ever_answers_503_times_out_and_the_message_says_so(tmp_path):
+    with pytest.raises(runner.StartTimeout, match=r"within 20s \(last answer: HTTP 503\)"):
+        wait_with_answers([503], timeout_s=20)
+
+
+def test_a_timeout_with_no_answer_at_all_does_not_mention_one():
+    with pytest.raises(runner.StartTimeout) as excinfo:
+        wait_with_answers([None], timeout_s=20)
+    assert "last answer" not in str(excinfo.value)
+
+
+def test_the_next_service_waits_for_a_server_that_answers_503_while_it_loads(tmp_path):
+    port = free_port()
+    script = tmp_path / "loading_server.py"
+    script.write_text(
+        "import http.server, time\n"
+        "t0 = time.time()\n"
+        "class H(http.server.BaseHTTPRequestHandler):\n"
+        "    def do_GET(self):\n"
+        "        self.send_response(503 if time.time() - t0 < 1.5 else 200)\n"
+        "        self.end_headers()\n"
+        "    def log_message(self, *args):\n"
+        "        pass\n"
+        f"http.server.HTTPServer(('127.0.0.1', {port}), H).serve_forever()\n"
+    )
+    slow = Service(name="a", port=port, gpus=[0], health="/", start_timeout_s=30, command=f"exec {sys.executable} {script}")
+    config = Config(services=[slow, http_service("b", free_port(), tmp_path)])
+    began, started_b = time.monotonic(), []
+    runner.run_up(config, tmp_path / "logs", hold=lambda: False, health_interval=0.2, grace=5,
+                  out=lambda line: started_b.append(time.monotonic() - began) if "starting b" in line else None)
+    assert started_b[0] >= 1.4  # b did not start while a was still answering 503
+
+
+def test_the_status_row_of_a_loading_service_is_not_up(sleeper):
+    state = {"services": {"a": {"status": "starting", "pid": sleeper.pid, "port": 1, "health": "/"}}}
+    [row] = runner.service_rows(state, probe_fn=fake_probe(503))
+    assert (row.state, row.health, row.up) == ("starting", "HTTP 503", False)
+    [row] = runner.service_rows(state, probe_fn=fake_probe(200))
+    assert (row.state, row.up) == ("running", True)
+
+
+# --- a port that something else already holds --------------------------------------------------------------------
+
+
+def test_port_in_use_sees_a_listener_and_a_free_port():
+    import socket
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        assert runner.port_in_use(listener.getsockname()[1])
+    assert not runner.port_in_use(free_port())
+
+
+def test_up_refuses_to_start_when_a_port_is_already_taken_and_starts_nothing(tmp_path):
+    import socket
+
+    config = Config(services=[http_service("a", free_port(), tmp_path), http_service("b", 1, tmp_path)])
+    with socket.socket() as squatter:
+        squatter.bind(("127.0.0.1", 0))
+        squatter.listen()
+        config.services[1].port = squatter.getsockname()[1]
+        with pytest.raises(runner.RunError, match=r"port \d+ \(b\) is already in use"):
+            runner.run_up(config, tmp_path / "logs", out=lambda _: None, health_interval=0.2, grace=5)
+    assert not (tmp_path / "logs" / "a.log").exists() and runner.read_state(tmp_path / "logs") is None

@@ -189,13 +189,12 @@ def status_view(rows: list[runner.ServiceRow]) -> Group:
     _columns(table, (("Service", "left"), ("State", "left"), ("PID", "right"), ("Port", "right"), ("Health", "left")))
     for row in rows:
         mark, style = STATE_STYLE.get(row.state, ("?", ""))
-        answering = row.health.startswith("HTTP")
         table.add_row(
             row.name,
             Text(f"{mark} {row.state}", style=style),
             str(row.pid) if row.pid else "-",
             str(row.port),
-            Text(row.health, style="green" if answering else "dim" if row.health == "-" else "red"),
+            Text(row.health, style="green" if row.up else "dim" if row.health == "-" else "red"),
         )
     notes = [Text(f"  {r.name}: {r.error}  (see: mesh logs {r.name})", style="red") for r in rows if r.error]
     return Group(table, *notes)
