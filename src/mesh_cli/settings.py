@@ -60,7 +60,7 @@ def _ask() -> Path:
         raise SettingsError("no folder chosen; run mesh up again, or pass --log-dir FOLDER") from exc
     folder = Path(os.path.abspath(os.path.expanduser(answer))) if answer else default
     try:
-        folder.mkdir(parents=True, exist_ok=True)
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     except OSError as exc:
         raise SettingsError(f"cannot create {folder}: {exc.strerror}") from exc
     try:

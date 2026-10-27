@@ -767,3 +767,53 @@ def test_a_service_on_a_gpu_missing_from_the_readings_says_unavailable_not_an_em
     runner.run_up(config, tmp_path / "logs", snapshot=lambda: {5: 100}, hold=lambda: False, out=lines.append,
                   health_interval=0.2, grace=5)
     assert "      a is up  (memory it added: unavailable)" in lines
+
+
+# --- files that hold commands and logs are private to the user ----------------------------------------------------------
+
+
+@pytest.fixture
+def open_umask():
+    """A umask that hides nothing, so a file is only private if mesh made it so."""
+    old = os.umask(0)
+    yield
+    os.umask(old)
+
+
+def mode(path) -> int:
+    import stat
+
+    return stat.S_IMODE(os.stat(path).st_mode)
+
+
+def test_the_state_file_is_private(tmp_path, open_umask):
+    runner.write_state(tmp_path, {"services": {}})
+    assert mode(tmp_path / "state.json") == 0o600
+
+
+def test_a_leftover_temporary_state_file_does_not_loosen_the_new_one(tmp_path, open_umask):
+    (tmp_path / "state.tmp").write_text("old")
+    os.chmod(tmp_path / "state.tmp", 0o644)
+    runner.write_state(tmp_path, {"services": {}})
+    assert mode(tmp_path / "state.json") == 0o600
+
+
+def test_service_logs_are_private_and_an_older_loose_log_is_tightened(tmp_path, open_umask):
+    svc = Service(name="a", port=1, gpus=[0], command="echo hello")
+    (tmp_path / "a.log").write_text("from an earlier version")
+    os.chmod(tmp_path / "a.log", 0o644)
+    runner.start_service(svc, tmp_path).wait()
+    assert mode(tmp_path / "a.log") == 0o600
+    assert (tmp_path / "a.log").read_text() == "hello\n"  # truncated and rewritten, as before
+
+
+def test_a_log_folder_created_by_up_is_private_and_an_existing_one_is_left_alone(tmp_path, open_umask):
+    config = Config(services=[http_service("a", free_port(), tmp_path)])
+    fresh = tmp_path / "fresh"
+    runner.run_up(config, fresh, hold=lambda: False, out=lambda _: None, health_interval=0.2, grace=5)
+    assert mode(fresh) == 0o700
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    os.chmod(shared, 0o755)
+    runner.run_up(config, shared, hold=lambda: False, out=lambda _: None, health_interval=0.2, grace=5)
+    assert mode(shared) == 0o755  # someone's own choice is not changed

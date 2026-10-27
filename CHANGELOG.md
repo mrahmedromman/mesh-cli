@@ -18,6 +18,9 @@ All notable changes to this project are recorded here. The format follows
   that `gpus` only informs the plan and the command must pin the GPU itself.
 
 ### Fixed
+- `state.json` copies each service's full command (which can contain tokens such as `HF_TOKEN`), and it and the
+  logs were readable by other users on the machine. They are now written with mode `600`, and a folder that `mesh`
+  creates gets mode `700`. An existing folder keeps its permissions.
 - A failed `nvidia-smi` reading while `mesh up` was starting services (a timeout under load, for example) stopped
   the whole start, even though the reading only feeds the "memory it added" figure. The start now carries on and
   that line says `unavailable`.

@@ -163,7 +163,10 @@ def read_state(log_dir: Path) -> dict | None:
 def write_state(log_dir: Path, state: dict) -> None:
     target = Path(log_dir) / STATE_FILE
     tmp = target.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2))
+    # The file holds each service's full command, which may contain tokens, so only the user may read it.
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
+        os.fchmod(handle.fileno(), 0o600)  # a temporary file left by an older version may have looser permissions
+        handle.write(json.dumps(state, indent=2))
     os.replace(tmp, target)
 
 
@@ -255,7 +258,8 @@ def start_service(svc: Service, log_dir: Path) -> subprocess.Popen:
     if not svc.command:
         raise RunError(f"service '{svc.name}' has no 'command' in the config")
     path = log_path(log_dir, svc.name)
-    with open(path, "wb") as log:
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as log:
+        os.fchmod(log.fileno(), 0o600)  # logs can hold prompts and paths; this also tightens a log from an older version
         return subprocess.Popen(
             ["bash", "-c", svc.command],
             stdout=log,
@@ -436,7 +440,7 @@ def run_up(
     if taken:  # checked before anything starts: whatever answers there would pass for the new service
         raise RunError("; ".join(taken) + ". Stop it, or change the port in the config.")
     log_dir = Path(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)  # private if mesh creates it; an existing folder is left alone
 
     started: list[tuple[Service, subprocess.Popen]] = []
     state: dict = {
