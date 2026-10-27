@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 import time
@@ -267,13 +268,18 @@ def _cmd_logs(args: argparse.Namespace) -> int:
             sys.stdout.flush()
             if not args.follow:
                 return 0
+            size = os.fstat(handle.fileno()).st_size
             while True:
                 chunk = handle.read()
+                now = os.fstat(handle.fileno()).st_size
                 if chunk:
                     sys.stdout.write(chunk)
                     sys.stdout.flush()
+                elif now < size:
+                    handle.seek(0)  # the next `mesh up` emptied this file and started the log over: read it from the top
                 else:
                     time.sleep(0.5)
+                size = now
     except KeyboardInterrupt:
         return 0
 

@@ -312,3 +312,56 @@ def test_the_memory_reading_used_by_up_gives_none_instead_of_raising(monkeypatch
 
     monkeypatch.setattr(cli_module, "read_gpus", broken)
     assert cli_module._used_memory() is None
+
+
+def follow_with(tmp_path, monkeypatch, capsys, between):
+    """Run `mesh logs llm -f` for as many waits as `between` has steps; each step changes the log, the last one ends it."""
+    steps = iter(between)
+
+    def fake_sleep(seconds):
+        try:
+            next(steps)()
+        except StopIteration:
+            raise KeyboardInterrupt from None
+
+    monkeypatch.setattr(cli_module.time, "sleep", fake_sleep)
+    assert main(["logs", "llm", "-f", "--log-dir", str(tmp_path)]) == 0
+    return capsys.readouterr().out
+
+
+def test_following_a_log_shows_what_is_appended(tmp_path, monkeypatch, capsys):
+    log = tmp_path / "llm.log"
+    log.write_text("one\ntwo\n")
+
+    def append():
+        with open(log, "a") as handle:
+            handle.write("three\n")
+
+    assert follow_with(tmp_path, monkeypatch, capsys, [append]) == "one\ntwo\nthree\n"
+
+
+def test_following_a_log_that_is_started_over_shows_the_new_log_from_its_first_line(tmp_path, monkeypatch, capsys):
+    log = tmp_path / "llm.log"
+    log.write_text("old line one\nold line two\nold line three\n")
+
+    def start_over():  # what the next `mesh up` does: the same file, emptied and written again
+        with open(log, "w") as handle:
+            handle.write("new one\n")
+
+    assert follow_with(tmp_path, monkeypatch, capsys, [start_over]) == (
+        "old line one\nold line two\nold line three\nnew one\n"
+    )
+
+
+def test_following_keeps_working_after_the_log_was_started_over(tmp_path, monkeypatch, capsys):
+    log = tmp_path / "llm.log"
+    log.write_text("old old old old\n")
+
+    def start_over():
+        log.write_text("new\n")
+
+    def append():
+        with open(log, "a") as handle:
+            handle.write("more\n")
+
+    assert follow_with(tmp_path, monkeypatch, capsys, [start_over, append]) == "old old old old\nnew\nmore\n"

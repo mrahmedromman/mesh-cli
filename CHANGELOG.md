@@ -23,6 +23,9 @@ All notable changes to this project are recorded here. The format follows
   The Docker lines were also removed from `examples/dual-gpu.yaml`.
 
 ### Fixed
+- `mesh logs -f` went quiet after the stack was restarted: `mesh up` starts each log over, but the follower kept its
+  old position and showed nothing until the new log grew past the old size. It now starts again from the top of the
+  new log.
 - `state.json` copies each service's full command (which can contain tokens such as `HF_TOKEN`), and it and the
   logs were readable by other users on the machine. They are now written with mode `600`, and a folder that `mesh`
   creates gets mode `700`. An existing folder keeps its permissions.

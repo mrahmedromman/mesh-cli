@@ -67,6 +67,9 @@ mesh logs llm -n all -f      # the whole log, then follow live
 mesh logs llm -n 0 -f        # only new lines from now on
 ```
 
+If the stack is stopped and started again while you are following, `mesh up` starts the log over, and `mesh logs -f`
+shows the new log from its first line.
+
 ## `mesh gpu`
 
 ```bash
