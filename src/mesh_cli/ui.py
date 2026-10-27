@@ -192,7 +192,7 @@ def status_view(rows: list[runner.ServiceRow]) -> Group:
         table.add_row(
             row.name,
             Text(f"{mark} {row.state}", style=style),
-            str(row.pid) if row.pid else "-",
+            row.shown_pid,
             str(row.port),
             Text(row.health, style="green" if row.up else "dim" if row.health == "-" else "red"),
         )

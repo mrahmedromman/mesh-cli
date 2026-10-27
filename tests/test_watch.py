@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -115,3 +116,67 @@ def test_status_prints_once_when_input_or_output_is_not_a_terminal(tmp_path, mon
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
     assert cli_module.main(["status", "--log-dir", str(tmp_path)]) == 0
     assert capsys.readouterr().out.count("pending") == 2  # printed once each time, not a live view
+
+
+# --- what stays on the screen when the view ends ------------------------------------------------------------------
+
+
+def run_watch_ending_with(monkeypatch, rows, quit_by_user):
+    """Run the real watch() with the terminal parts replaced, and return what it printed after leaving the live view."""
+    import contextlib
+    import io
+    import sys
+
+    from rich.console import Console
+
+    class FakeLive:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def update(self, *args, **kwargs):
+            pass
+
+    class FakeInput:
+        def fileno(self):
+            return 0
+
+    printed = io.StringIO()
+    monkeypatch.setattr(watch, "Live", FakeLive)
+    monkeypatch.setattr(watch, "single_keys", lambda fd: contextlib.nullcontext())
+    monkeypatch.setattr(watch, "poll", lambda *args, **kwargs: (rows, quit_by_user))
+    monkeypatch.setattr(watch.ui, "console", lambda: Console(file=printed, force_terminal=False, width=100))
+    monkeypatch.setattr(sys, "stdin", FakeInput())
+    watch.watch(Path("unused"))
+    return printed.getvalue()
+
+
+def test_pressing_q_leaves_the_last_table_on_the_screen(monkeypatch):
+    rows = [runner.ServiceRow("llm", "running", 4121, 8001, "HTTP 200", up=True),
+            runner.ServiceRow("stt", "starting", 4188, 8004, "not answering")]
+    out = run_watch_ending_with(monkeypatch, rows, quit_by_user=True)
+    assert "llm" in out and "4121" in out and "stt" in out and "4188" in out  # the PIDs can still be read
+    assert "running" in out and "starting" in out  # as they were, not rewritten as stopped
+    assert "The stack has stopped." not in out
+
+
+def test_when_the_stack_stops_the_table_stays_with_everything_marked_stopped(monkeypatch):
+    rows = [runner.ServiceRow("llm", "running", 4121, 8001, "HTTP 200", up=True)]
+    out = run_watch_ending_with(monkeypatch, rows, quit_by_user=False)
+    assert "llm" in out and "stopped" in out and "The stack has stopped." in out
+
+
+def test_nothing_is_printed_if_there_was_nothing_to_show(monkeypatch):
+    assert run_watch_ending_with(monkeypatch, [], quit_by_user=True) == ""
+
+
+def test_the_redraw_loop_passes_the_gpu_pids_to_every_frame(tmp_path):
+    write_state(tmp_path, "pending")
+    seen = []
+    rows, _ = watch.poll(tmp_path, lambda r: seen.append(r[0].gpu_pids), lambda seconds: True, pids=lambda: {"s0": [4242]})
+    assert seen == [(4242,)] and rows[0].gpu_known is True

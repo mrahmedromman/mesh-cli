@@ -7,6 +7,13 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Changed
+- Pressing `q` in `mesh status` now leaves the last table on your terminal instead of clearing it, so the process
+  ids can still be read and copied.
+- `mesh gpu` now names the process ids behind each service or container (`mesh service · pid 235930`), the same ids
+  `nvidia-smi` prints, so a service can be matched with its output. The PID column of `mesh status` shows the same
+  ids, `-` until the service has a GPU process, instead of the process `mesh` started (for a Docker service the
+  `docker run` client), which never matched `nvidia-smi`. Without `nvidia-smi` it still shows the process `mesh`
+  started.
 - The docs now say that the health check connects to `127.0.0.1`, so a service that listens only on a LAN address
   or on IPv6 is never seen and `mesh up` waits out `start_timeout_s`.
 - `mesh status` is now a live view in a terminal: every service of the stack is listed from the start, with its
@@ -15,6 +22,10 @@ All notable changes to this project are recorded here. The format follows
 - `state.json` now lists all services from the start and records each one's status.
 
 ### Added
+- `stop_timeout_s`, a per-service setting (default 30 seconds) for how long a service gets to stop before it is
+  killed. Ctrl+C, `mesh down` and the clean-up of a service that died all use it; it is saved in the state file so
+  `mesh down` honours it without your config, and `mesh down` waits for `mesh up` for at least as long as the
+  services' timeouts add up to.
 - `mesh up` warns when a GPU a service lists gained almost no memory while it started, and names any other GPU
   that grew: the sign that the service's command is not using the GPU the plan assumed. The docs now explain
   that `gpus` only informs the plan and the command must pin the GPU itself.
@@ -25,9 +36,12 @@ All notable changes to this project are recorded here. The format follows
   The Docker lines were also removed from `examples/dual-gpu.yaml`.
 
 ### Fixed
+- When a service's main process died after it was up (for example `kill -9` on a vLLM server), `mesh up` only
+  warned. Worker processes in the same process group kept running and kept the GPU memory, while `mesh status`
+  showed the service as failed. `mesh up` now also stops what is left of that service.
 - `mesh logs -f` went quiet after the stack was restarted: `mesh up` starts each log over, but the follower kept its
-  old position and showed nothing until the new log grew past the old size. It now starts again from the top of the
-  new log.
+  old position and showed nothing until the new log grew past the old size. It now notices that the service was
+  started again (its process id changes, or the file shrinks) and starts from the top of the new log.
 - `state.json` copies each service's full command (which can contain tokens such as `HF_TOKEN`), and it and the
   logs were readable by other users on the machine. They are now written with mode `600`, and a folder that `mesh`
   creates gets mode `700`. An existing folder keeps its permissions.

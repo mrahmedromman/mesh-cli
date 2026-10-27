@@ -365,3 +365,66 @@ def test_following_keeps_working_after_the_log_was_started_over(tmp_path, monkey
             handle.write("more\n")
 
     assert follow_with(tmp_path, monkeypatch, capsys, [start_over, append]) == "old old old old\nnew\nmore\n"
+
+
+def set_service_pid(folder, pid):
+    runner_state = {"controller_pid": 1, "services": {"llm": {"status": "running", "pid": pid, "port": 1, "health": "/"}}}
+    (folder / "state.json").write_text(__import__("json").dumps(runner_state))
+
+
+def test_following_shows_a_restarted_log_from_its_first_line_even_if_it_is_already_longer_than_the_old_one(tmp_path, monkeypatch, capsys):
+    log = tmp_path / "llm.log"
+    log.write_text("old\n")  # a short old log: the new one will be longer than this by the time anyone looks
+    set_service_pid(tmp_path, 111)
+
+    def restart():  # the stack was started again: new process id, log started over and already longer than before
+        log.write_text("new line one\nnew line two\nnew line three\n")
+        set_service_pid(tmp_path, 222)
+
+    assert follow_with(tmp_path, monkeypatch, capsys, [restart]) == "old\nnew line one\nnew line two\nnew line three\n"
+
+
+def test_following_does_not_start_over_while_the_same_process_keeps_writing(tmp_path, monkeypatch, capsys):
+    log = tmp_path / "llm.log"
+    log.write_text("one\n")
+    set_service_pid(tmp_path, 111)
+
+    def append():
+        with open(log, "a") as handle:
+            handle.write("two\n")
+
+    assert follow_with(tmp_path, monkeypatch, capsys, [append, append]) == "one\ntwo\ntwo\n"
+
+
+def test_following_copes_with_the_state_file_being_gone_between_two_runs(tmp_path, monkeypatch, capsys):
+    log = tmp_path / "llm.log"
+    log.write_text("old old old\n")
+    set_service_pid(tmp_path, 111)
+
+    def stopped():  # `mesh up` ended and removed its state file
+        (tmp_path / "state.json").unlink()
+
+    def started_again():
+        log.write_text("fresh start\nsecond line\n")
+        set_service_pid(tmp_path, 222)
+
+    assert follow_with(tmp_path, monkeypatch, capsys, [stopped, started_again]) == "old old old\nfresh start\nsecond line\n"
+
+
+def test_status_shows_the_gpu_process_ids_when_nvidia_smi_can_be_read(tmp_path, monkeypatch, capsys):
+    save_stack(tmp_path)  # one service, llm, whose recorded (launcher) pid is 1
+    monkeypatch.setattr(cli_module.holders, "lookup_service_pids", lambda log_dir: {"llm": [235930]})
+    assert main(["status", "--log-dir", str(tmp_path)]) == 0
+    line = capsys.readouterr().out.splitlines()[0].split()
+    assert line[:4] == ["llm", "running", "pid", "235930"]
+
+
+def test_status_shows_the_process_mesh_started_when_nvidia_smi_cannot_be_read(tmp_path, monkeypatch, capsys):
+    save_stack(tmp_path)
+
+    def unreadable(log_dir):
+        raise GpuError("nvidia-smi not found")
+
+    monkeypatch.setattr(cli_module.holders, "lookup_service_pids", unreadable)
+    assert main(["status", "--log-dir", str(tmp_path)]) == 0
+    assert capsys.readouterr().out.splitlines()[0].split()[:4] == ["llm", "running", "pid", "1"]

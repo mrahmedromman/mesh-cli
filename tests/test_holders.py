@@ -238,3 +238,148 @@ def test_render_omits_utilization_when_unknown():
     gpus = parse_gpu_query((FIXTURES / "gpu_query_running.csv").read_text())
     text = render(attribute(gpus, [], {}, FakeProc(), {}))
     assert "utilization" not in text
+
+
+# --- the real process ids, so a service can be matched with what nvidia-smi prints --------------------------------------
+
+
+def test_a_service_lists_the_pids_of_its_gpu_processes():
+    gpu0, gpu1 = (by_label(r) for r in attribute(*rig()))
+    assert gpu0["llm"].detail == "mesh service · pid 555362"  # each tensor-parallel worker is on its own GPU, as in nvidia-smi
+    assert gpu1["llm"].detail == "mesh service · pid 555363"
+    assert gpu0["stt"].detail == 'mesh service · container "stt" · pid 558799'
+    assert gpu1["embed"].detail == 'mesh service · container "embed" · pid 562327'
+
+
+def test_a_container_not_started_by_mesh_lists_its_pid_too():
+    gpus = [Gpu(0, UUID0, "Card", 24564, 3000, 20000)]
+    processes = [GpuProcess(UUID0, 4242, "python", 2500), GpuProcess(UUID0, 4243, "python", 400)]
+    proc = FakeProc(cgroups={4242: cgroup_v2(STT_ID), 4243: cgroup_v2(STT_ID)})
+    [report] = attribute(gpus, processes, {}, proc, {STT_ID: "other-box"})
+    assert by_label(report)["other-box"].detail == "Docker container, not started by mesh · pids 4242, 4243"
+
+
+def test_a_long_list_of_pids_is_shortened():
+    gpus = [Gpu(0, UUID0, "Card", 24564, 3000, 20000)]
+    processes = [GpuProcess(UUID0, 100 + i, "python", 100) for i in range(6)]
+    proc = FakeProc(groups={100 + i: 555000 for i in range(6)})
+    [report] = attribute(gpus, processes, {"llm": ServiceInfo(555000, "exec x")}, proc, {})
+    assert by_label(report)["llm"].detail == "mesh service · pids 100, 101, 102, 103, … (6 processes)"
+
+
+# --- the GPU process ids of each service, for mesh status ---------------------------------------------------------------
+
+
+def test_service_pids_collects_each_services_gpu_process_ids_across_its_gpus():
+    gpus, processes, services, proc, containers = rig()
+    assert holders.service_pids(services, processes, proc, containers) == {
+        "llm": [555362, 555363],  # one tensor-parallel worker on each GPU
+        "stt": [558799],  # the container's engine process, found through its cgroup
+        "embed": [562327],
+    }
+
+
+def test_service_pids_leaves_out_processes_that_belong_to_no_service_and_services_without_gpu_processes():
+    gpus, processes, services, proc, containers = rig()
+    services["idle"] = ServiceInfo(999000, "exec something-on-the-cpu")
+    found = holders.service_pids(services, processes, proc, containers)
+    assert "idle" not in found and all(pid not in (19492, 24909) for pids in found.values() for pid in pids)
+
+
+def test_lookup_reads_nvidia_smi_the_state_file_and_docker(tmp_path, monkeypatch):
+    from mesh_cli import runner
+
+    gpus, processes, services, proc, containers = rig()
+    runner.write_state(tmp_path, {"services": {name: {"pid": info.pid, "command": info.command, "stop": info.stop} for name, info in services.items()}})
+
+    def run(command):
+        if command == holders.COMPUTE_QUERY:
+            return (FIXTURES / "compute_apps_running.csv").read_text()
+        return "\n".join(f"{cid}\t{name}" for cid, name in containers.items())  # docker ps
+
+    monkeypatch.setattr(holders, "_run", run)
+    assert holders.lookup_service_pids(tmp_path, proc) == {"llm": [555362, 555363], "stt": [558799], "embed": [562327]}
+
+
+def test_lookup_raises_when_nvidia_smi_cannot_be_read(tmp_path, monkeypatch):
+    def broken(command):
+        raise GpuError("nvidia-smi not found")
+
+    monkeypatch.setattr(holders, "_run", broken)
+    with pytest.raises(GpuError):
+        holders.lookup_service_pids(tmp_path)
+
+
+def wait_until(condition, timeout=5.0):
+    import time
+
+    end = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < end, "timed out"
+        time.sleep(0.01)
+
+
+def test_the_cache_waits_for_the_first_lookup_and_then_refreshes_in_the_background_not_more_often_than_asked(tmp_path):
+    import threading
+
+    calls, now = [], [0.0]
+    gate = threading.Event()  # holds the second lookup back, so "answers at once" can be checked without a race
+
+    def lookup(log_dir):
+        calls.append(now[0])
+        if len(calls) == 2:
+            gate.wait(5)
+        return {"llm": [len(calls)]}
+
+    cache = holders.ServicePids(tmp_path, lookup=lookup, every=3.0, clock=lambda: now[0])
+    assert cache.get() == {"llm": [1]}  # the first call has an answer, so the first frame is already right
+    cache.get()
+    cache.get()
+    assert calls == [0.0]  # nothing more within three seconds
+    now[0] = 3.5
+    assert cache.get() == {"llm": [1]}  # answers at once with what it knows, while the new lookup is still running
+    wait_until(lambda: len(calls) == 2)
+    assert cache.get() == {"llm": [1]}  # and does not start another one while one is running
+    gate.set()
+    wait_until(lambda: cache.get() == {"llm": [2]})  # the new numbers arrive on a later call
+
+
+def test_the_cache_keeps_the_last_good_answer_when_a_lookup_fails(tmp_path):
+    answers, now = iter([{"llm": [7]}, GpuError("timed out")]), [0.0]
+
+    def lookup(log_dir):
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    cache = holders.ServicePids(tmp_path, lookup=lookup, every=1.0, clock=lambda: now[0])
+    assert cache.get() == {"llm": [7]}
+    now[0] = 5.0
+    cache.get()
+    import time
+
+    time.sleep(0.2)
+    assert cache.get() == {"llm": [7]}  # a hiccup must not make the numbers jump back to the launcher's pid
+
+
+def test_the_cache_gives_none_when_nvidia_smi_never_worked(tmp_path):
+    def lookup(log_dir):
+        raise GpuError("nvidia-smi not found")
+
+    assert holders.ServicePids(tmp_path, lookup=lookup).get() is None
+
+
+def test_a_slow_first_lookup_does_not_hold_up_the_first_frame(tmp_path):
+    import threading
+
+    release = threading.Event()
+
+    def lookup(log_dir):
+        release.wait(5)
+        return {"llm": [1]}
+
+    cache = holders.ServicePids(tmp_path, lookup=lookup, first_wait=0.05)
+    assert cache.get() is None  # not known yet: the caller shows something else for now
+    release.set()
+    wait_until(lambda: cache.get() == {"llm": [1]})

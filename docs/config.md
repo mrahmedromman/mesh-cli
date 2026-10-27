@@ -37,6 +37,7 @@ silently ignored. Service names and ports must be unique.
 | `overhead_mib` | no | Extra memory beyond the fraction, used only for a GPU with no `measured_mib`. Default 0. |
 | `health` | no | Path polled until the service answers. Default `/v1/models`. Any HTTP response counts as alive. |
 | `start_timeout_s` | no | Seconds to wait for the health check. Default 900. |
+| `stop_timeout_s` | no | Seconds the service gets to stop once it is asked to, before it is killed. Default 30. Raise it for a model that needs longer to shut down and release its GPU memory. See [Stopping a service](#stopping-a-service). |
 
 `measured_mib` may only list GPUs that are in `gpus`.
 
@@ -110,6 +111,23 @@ docker exec NAME python -c "import torch; print(torch.cuda.is_available(), torch
 ```
 
 It should print `True 1`.
+
+## Stopping a service
+
+Ctrl+C, `mesh down` and the clean-up after a failed start all stop each service the same way. First its `stop`
+command runs, if it has one (for example `docker stop NAME`). Then the whole process group gets SIGTERM, the normal
+"please shut down" signal, which vLLM handles by closing its server and workers. `mesh` then waits up to the
+service's `stop_timeout_s` (30 seconds unless you set it) for the group to exit. Only if something is still running
+after that does it send SIGKILL (`kill -9`). Services stop in reverse start order, one at a time.
+
+```yaml
+  - name: llm
+    stop_timeout_s: 120      # a big model: give it two minutes to shut down before it is killed
+```
+
+The value is saved in the state file, so it applies even when `mesh down` runs from another folder or without your
+config. `mesh down` also waits for `mesh up` to finish stopping for as long as the services' timeouts add up to (at
+least 90 seconds) before it steps in itself.
 
 ## Health paths
 

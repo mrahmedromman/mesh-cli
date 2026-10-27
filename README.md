@@ -26,18 +26,9 @@
 service. A service is any command that listens on a port: a chat model, speech-to-text, embeddings, text-to-speech,
 or anything else that uses GPU memory.
 
-```
-$ mesh up models.yaml
-[1/4] starting llm on port 8001  (log: ~/mesh-deck/llm.log)
-      llm is up  (memory it added: GPU 0: ~16260 MiB, GPU 1: ~16260 MiB)
-[2/4] starting stt on port 8004  (log: ~/mesh-deck/stt.log)
-      stt is up  (memory it added: GPU 0: ~6436 MiB)
-[3/4] starting tts on port 8005  (log: ~/mesh-deck/tts.log)
-      tts is up  (memory it added: GPU 1: ~2353 MiB)
-[4/4] starting embed on port 8003  (log: ~/mesh-deck/embed.log)
-      embed is up  (memory it added: GPU 1: ~3059 MiB)
-All services are up. Press Ctrl+C to stop everything.
-```
+<p align="center">
+  <img alt="mesh status showing four services: llm and stt running, tts starting, embed pending" src="https://raw.githubusercontent.com/mrahmedromman/mesh-deck/main/docs/assets/social-preview.png" width="720">
+</p>
 
 > **Early release.** Built and checked on one machine with two RTX 4090s, running vLLM services. It reads
 > `nvidia-smi`, so it needs an NVIDIA GPU and a Unix-like system (tested on Linux). Reports from other GPUs and

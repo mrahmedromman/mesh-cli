@@ -1,0 +1,73 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>mesh-deck social preview (1280x640)</title>
+<!--
+  Source of docs/assets/social-preview.png, the image GitHub shows when the repository is shared.
+  Render: Google Chrome --headless=new --hide-scrollbars --window-size=1280,640 --screenshot=social-preview.png social-preview.html
+-->
+<style>
+  :root { --bg: #0b0f17; --card: #111827; --line: #263042; --text: #f9fafb; --muted: #9ca3af; --green: #34d399; --yellow: #fbbf24; --red: #f87171; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1280px; height: 640px; background: var(--bg); color: var(--text); overflow: hidden; }
+  body { font-family: -apple-system, "SF Pro Display", "Segoe UI", Helvetica, Arial, sans-serif; position: relative; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  .glow { position: absolute; right: -180px; top: -200px; width: 760px; height: 760px; border-radius: 50%;
+          background: radial-gradient(circle, rgba(96,165,250,.20), rgba(96,165,250,0) 65%); }
+  .brand { position: absolute; left: 72px; top: 76px; display: flex; align-items: center; gap: 22px; }
+  .brand svg { width: 112px; height: 128px; }
+  .brand .name { font-size: 76px; font-weight: 700; letter-spacing: -1px; }
+  .tagline { position: absolute; left: 72px; top: 262px; width: 520px; font-size: 35px; line-height: 1.32; font-weight: 600; }
+  .tagline span { color: #60a5fa; }
+  .install { position: absolute; left: 72px; bottom: 64px; display: inline-flex; align-items: center; gap: 14px;
+             padding: 16px 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: 26px; }
+  .install b { color: var(--green); font-weight: 600; }
+  .meta { position: absolute; left: 72px; bottom: 24px; font-size: 18px; color: var(--muted); }
+  .term { position: absolute; left: 650px; top: 108px; width: 560px; border: 1px solid var(--line); border-radius: 16px;
+          background: var(--card); box-shadow: 0 24px 60px rgba(0,0,0,.45); overflow: hidden; }
+  .bar { display: flex; gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .bar i { width: 12px; height: 12px; border-radius: 50%; background: #374151; display: block; }
+  .body { padding: 22px 26px 26px; font-size: 21px; line-height: 1.55; }
+  .prompt { color: var(--muted); margin-bottom: 14px; }
+  .prompt b { color: var(--text); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; }
+  th { text-align: left; font-weight: 500; color: var(--muted); padding: 0 0 10px; border-bottom: 1px solid var(--line); font-size: 18px; }
+  td { padding: 8px 0 0; white-space: nowrap; }
+  td.r, th.r { text-align: right; }
+  .ok { color: var(--green); } .go { color: var(--yellow); } .wait { color: var(--muted); }
+  .foot { margin-top: 18px; color: var(--muted); font-size: 18px; }
+  .foot b { color: var(--text); font-weight: 600; }
+</style>
+<div class="glow"></div>
+
+<div class="brand">
+  <svg viewBox="0 0 88 96" role="img" aria-label="mesh-deck logo">
+    <rect x="8" y="8" width="32" height="80" rx="6" fill="none" stroke="#d1d5db" stroke-width="3"/>
+    <rect x="12" y="50" width="24" height="34" rx="3" fill="#60a5fa"/>
+    <rect x="12" y="28" width="24" height="20" rx="3" fill="#2dd4bf"/>
+    <rect x="48" y="8" width="32" height="80" rx="6" fill="none" stroke="#d1d5db" stroke-width="3"/>
+    <rect x="52" y="50" width="24" height="34" rx="3" fill="#60a5fa"/>
+    <rect x="52" y="36" width="24" height="12" rx="3" fill="#fbbf24"/>
+    <rect x="52" y="22" width="24" height="12" rx="3" fill="#a78bfa"/>
+  </svg>
+  <div class="name mono">mesh-deck</div>
+</div>
+
+<div class="tagline">A <span>control deck</span> for running many AI models on shared GPUs without out-of-memory crashes.</div>
+
+<div class="term mono">
+  <div class="bar"><i></i><i></i><i></i></div>
+  <div class="body">
+    <div class="prompt">$ <b>mesh status</b></div>
+    <table>
+      <tr><th>Service</th><th>State</th><th class="r">PID</th><th class="r">Port</th></tr>
+      <tr><td>llm</td>  <td class="ok">● running</td>  <td class="r">4121</td><td class="r">8001</td></tr>
+      <tr><td>stt</td>  <td class="ok">● running</td>  <td class="r">4188</td><td class="r">8004</td></tr>
+      <tr><td>tts</td>  <td class="go">◐ starting</td> <td class="r">4260</td><td class="r">8005</td></tr>
+      <tr><td>embed</td><td class="wait">○ pending</td><td class="r">-</td>   <td class="r">8003</td></tr>
+    </table>
+    <div class="foot">plan first · start in order · <b>press q to quit</b></div>
+  </div>
+</div>
+
+<div class="install mono"><span class="ok">$</span> <b>pipx install</b> mesh-deck</div>
+<div class="meta">Open source · MIT · github.com/mrahmedromman/mesh-deck</div>

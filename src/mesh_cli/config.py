@@ -38,6 +38,8 @@ class Service(BaseModel):
     # Extra command run first when stopping (e.g. `docker stop my-stt`).
     stop: str | None = None
     start_timeout_s: int = Field(default=900, gt=0)
+    # How long to wait for the service to stop after it is asked to (SIGTERM, and its `stop` command) before it is killed.
+    stop_timeout_s: int = Field(default=30, gt=0)
 
     @model_validator(mode="after")
     def _measured_gpus_are_used(self) -> Service:

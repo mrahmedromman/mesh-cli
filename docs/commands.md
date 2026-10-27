@@ -56,6 +56,11 @@ mesh up models.yaml --plan     # also print the full plan when everything fits
 See [How it works](how-it-works.md#what-mesh-up-does) for the exact steps. In short: plan, start each service
 in order, wait for its health check, report the memory it added, and stop everything on Ctrl+C.
 
+If a service's main process exits after it was up (it crashed, or someone ran `kill -9` on it), `mesh up` marks it
+`failed`, prints a warning, and also stops what is left of its process group. A model server with several worker
+processes (vLLM with tensor parallelism, for example) would otherwise keep its GPU memory although `mesh` reports it
+as dead. The other services keep running.
+
 ## `mesh logs`
 
 ```bash
@@ -67,8 +72,8 @@ mesh logs llm -n all -f      # the whole log, then follow live
 mesh logs llm -n 0 -f        # only new lines from now on
 ```
 
-If the stack is stopped and started again while you are following, `mesh up` starts the log over, and `mesh logs -f`
-shows the new log from its first line.
+If the stack is stopped and started again while you are following, `mesh up` starts the log over. `mesh logs -f`
+notices the service has a new process and shows the new log from its first line.
 
 ## `mesh gpu`
 
@@ -81,11 +86,16 @@ holder of the used memory, largest first:
 
 ```
 GPU 0  NVIDIA GeForce RTX 4090  24564 MiB total · 485 reserved · 23187 used · 892 free · 21% utilization
-    16252 MiB  llm          mesh service · 1 process
-     6430 MiB  stt          mesh service · container "stt" · 1 process
+    16252 MiB  llm          mesh service · pid 555362
+     6430 MiB  stt          mesh service · container "stt" · pid 558799
       417 MiB  desktop      graphics apps: Xorg, gnome-shell, firefox · 6 processes
        88 MiB  unattributed used memory that no listed process accounts for
 ```
+
+Each service or container line ends with the process ids that hold the memory on that GPU, the same ids
+`nvidia-smi` prints (for a vLLM service these are its engine and worker processes). This is how to match
+`nvidia-smi` with a service. `mesh status` shows the same ids in its PID column. Long lists are shortened (after
+four here, after three in `mesh status`).
 
 Each holder is one of:
 
@@ -113,12 +123,13 @@ is shown as unknown instead of failing.
 ## `mesh status` and `mesh down`
 
 `mesh status` lists every service of the stack, in start order, and keeps itself up to date every second. Press
-`q` (or Ctrl+C) to leave it.
+`q` (or Ctrl+C) to leave it; the last table is then printed on your terminal, so the process ids stay where you can
+copy them.
 
 | Column | Meaning |
 |---|---|
 | State | `pending` (not started yet), `starting` (loading, waiting for its health check), `running`, `failed` (it exited, or did not become healthy in time) or `stopping`. |
-| PID | `-` until the service has a process. |
+| PID | The process ids that hold the service's GPU memory, the same ids `mesh gpu` and `nvidia-smi` show (for a vLLM service its engine and worker processes; for a Docker service the processes inside the container, not the `docker run` client). `-` until the service has any, which for vLLM is a few seconds after it starts. If `nvidia-smi` cannot be read, it shows the process `mesh` started instead. |
 | Port | The port from your config. |
 | Health | The HTTP status from its health path, `not answering`, or `-` when there is no process to ask. |
 
@@ -165,12 +176,13 @@ All 3 services stopped.
 Other lines you may see:
 
 - `stopped llm (12s)`: a service that took a second or more to stop shows how long it took.
-- `stopped llm (force-killed after 30s)`: the service ignored the polite stop request for the full 30 seconds, so
-  it was killed.
+- `stopped llm (force-killed after 30s)`: the service ignored the polite stop request for its whole
+  [`stop_timeout_s`](config.md#stopping-a-service) (30 seconds unless you set another), so it was killed.
 - `tts was already stopped`: the process had exited before shutdown started.
 - `could not stop tts: permission denied ...`: the process belongs to another user. The last line then reads
   `1 of 3 services could not be stopped.`
-- If `mesh up` does not finish within 90 seconds, `mesh down` says so and stops the remaining services itself.
+- If `mesh up` does not finish stopping in time, `mesh down` says so and stops the remaining services itself. It
+  waits 90 seconds, or longer when the services' stop timeouts add up to more.
 
 The same messages appear when `mesh up` cleans up after a service fails to start.
 

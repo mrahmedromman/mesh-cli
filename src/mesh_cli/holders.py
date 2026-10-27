@@ -10,7 +10,10 @@ import os
 import pwd
 import re
 import subprocess
+import threading
+import time
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -221,6 +224,30 @@ def _processes(count: int) -> str:
     return f"{count} process{'' if count == 1 else 'es'}"
 
 
+def _pids(members: list[tuple[int, str]]) -> str:
+    """The process ids behind a holder, as nvidia-smi lists them, so a service can be matched with its output."""
+    pids = sorted(pid for pid, _ in members)
+    shown = ", ".join(str(pid) for pid in pids[:4])
+    if len(pids) == 1:
+        return f"pid {shown}"
+    return f"pids {shown}" + (f", … ({_processes(len(pids))})" if len(pids) > 4 else "")
+
+
+def _owner(
+    p: GpuProcess, leaders: dict[int, str], services: dict[str, ServiceInfo], proc: ProcFs, containers: dict[str, str],
+) -> tuple[str | None, str | None, str | None]:
+    """The mesh service a GPU process belongs to (or None), and its Docker container id and name if it has one."""
+    service = _service_of_pid(p.pid, leaders, proc)
+    cid = container_id(proc.cgroup(p.pid))
+    cname = next((n for i, n in containers.items() if cid and i.startswith(cid)), None) if cid else None
+    if service is None and cname:
+        service = next(
+            (n for n, info in services.items() if mentions_container(f"{info.command}\n{info.stop}", cname)),
+            None,
+        )
+    return service, cid, cname
+
+
 def attribute(
     gpus: list[Gpu],
     processes: list[GpuProcess],
@@ -233,14 +260,7 @@ def attribute(
     for gpu in gpus:
         groups: dict[tuple[Any, ...], list] = {}  # owner key -> [label, detail, mib, pids, names]
         for p in (p for p in processes if p.gpu_uuid == gpu.uuid):
-            service = _service_of_pid(p.pid, leaders, proc)
-            cid = container_id(proc.cgroup(p.pid))
-            cname = next((n for i, n in containers.items() if cid and i.startswith(cid)), None) if cid else None
-            if service is None and cname:
-                service = next(
-                    (n for n, info in services.items() if mentions_container(f"{info.command}\n{info.stop}", cname)),
-                    None,
-                )
+            service, cid, cname = _owner(p, leaders, services, proc, containers)
             key: tuple[Any, ...]
             if service is not None:
                 key, kind, label = ("mesh", service), "mesh", service
@@ -266,7 +286,7 @@ def attribute(
         holders = []
         for kind, label, detail, mib, members in groups.values():
             if kind in ("mesh", "container"):
-                detail += f" · {_processes(len(members))}"
+                detail += f" · {_pids(members)}"
             elif kind == "desktop":
                 names = list(dict.fromkeys(n for _, n in members if n))
                 shown = ", ".join(names[:4]) + (", …" if len(names) > 4 else "")
@@ -278,6 +298,68 @@ def attribute(
             holders.append(Holder("unattributed", "unattributed", "used memory that no listed process accounts for", leftover))
         reports.append(GpuReport(gpu, holders))
     return reports
+
+
+def service_pids(
+    services: dict[str, ServiceInfo], processes: list[GpuProcess], proc: ProcFs, containers: dict[str, str],
+) -> dict[str, list[int]]:
+    """The ids of the GPU processes of each service, over all its GPUs: the ids nvidia-smi lists for it."""
+    leaders = {info.pid: name for name, info in services.items()}
+    found: dict[str, set[int]] = {}
+    for p in processes:
+        service = _owner(p, leaders, services, proc, containers)[0]
+        if service is not None:
+            found.setdefault(service, set()).add(p.pid)
+    return {name: sorted(pids) for name, pids in found.items()}
+
+
+def lookup_service_pids(log_dir: Path, proc: ProcFs | None = None) -> dict[str, list[int]]:
+    """Read the live system: which GPU processes belong to which mesh service. Raises GpuError if nvidia-smi fails."""
+    apps = parse_compute_apps(_run(COMPUTE_QUERY))
+    processes = [GpuProcess(a.gpu_uuid, a.pid, a.process_name, a.used_mib) for a in apps]
+    services = services_from_state(runner.read_state(log_dir))
+    containers = read_container_names() if services else {}
+    return service_pids(services, processes, proc or LinuxProcFs(), containers)
+
+
+class ServicePids:
+    """`lookup_service_pids`, kept fresh in the background so a slow nvidia-smi can never freeze a live view.
+
+    `get()` returns at once with the last answer. The first call waits a moment (`first_wait` seconds) for the first
+    answer so that the first frame is already right. A failed lookup keeps the last good answer, and `None` means
+    that nvidia-smi has not been readable yet.
+    """
+
+    def __init__(
+        self,
+        log_dir: Path,
+        lookup: Callable[[Path], dict[str, list[int]]] | None = None,
+        every: float = 2.0,
+        first_wait: float = 2.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._log_dir, self._lookup = log_dir, lookup or lookup_service_pids
+        self._every, self._first_wait, self._clock = every, first_wait, clock
+        self._result: dict[str, list[int]] | None = None
+        self._asked: float | None = None
+        self._thread: threading.Thread | None = None
+
+    def get(self) -> dict[str, list[int]] | None:
+        now = self._clock()
+        busy = self._thread is not None and self._thread.is_alive()
+        if not busy and (self._asked is None or now - self._asked >= self._every):
+            self._asked = now
+            self._thread = threading.Thread(target=self._refresh, daemon=True)
+            self._thread.start()
+            if self._result is None:
+                self._thread.join(self._first_wait)
+        return self._result
+
+    def _refresh(self) -> None:
+        try:
+            self._result = self._lookup(self._log_dir)
+        except Exception:  # noqa: BLE001 - a background thread must never print a traceback over the live view
+            pass
 
 
 def render(reports: list[GpuReport]) -> str:

@@ -180,3 +180,17 @@ def test_wait_healthy_reports_elapsed_time_and_the_last_log_line(tmp_path):
         progress=lambda seconds, line: seen.append((seconds, line)),
     )
     assert seen == [(0.0, "loading weights 40%"), (5.0, "loading weights 40%")]
+
+
+def test_status_view_shows_the_gpu_process_ids_in_the_pid_column():
+    con = recording()
+    ui.print_status([
+        runner.ServiceRow("nemotron", "running", 233844, 8003, "HTTP 200", up=True, gpu_pids=(235930,), gpu_known=True),
+        runner.ServiceRow("qwen", "running", 193964, 8001, "HTTP 200", up=True, gpu_pids=(231394, 231395), gpu_known=True),
+        runner.ServiceRow("loading", "starting", 300, 8002, "not answering", gpu_known=True),
+    ], con)
+    out = text_of(con)
+    assert "235930" in out and "231394, 231395" in out
+    assert "233844" not in out and "193964" not in out  # the launcher's pid is not what is shown
+    loading = next(line for line in out.splitlines() if "loading" in line)
+    assert " - " in loading and "300" not in loading

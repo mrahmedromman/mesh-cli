@@ -1,6 +1,7 @@
 """Runner tests use throwaway http.server processes instead of real models."""
 
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -853,3 +854,199 @@ def test_progress_is_reported_with_the_service_name(tmp_path):
     runner.run_up(config, tmp_path / "logs", hold=lambda: False, out=lambda _: None, health_interval=0.2, grace=5,
                   progress=lambda name, seconds, line: seen.append((name, isinstance(seconds, float), isinstance(line, str))))
     assert ("a", True, True) in seen and seen[-1] == (None, True, True)
+
+
+# --- a service whose main process dies must not leave workers behind ----------------------------------------------------
+
+
+def test_when_a_service_main_process_is_killed_what_is_left_of_it_is_stopped_too(tmp_path):
+    """A vLLM service with tensor parallelism has worker processes in the same group; killed alone, they keep the GPU memory."""
+    port, pidfile = free_port(), tmp_path / "worker.pid"
+    svc = Service(name="a", port=port, gpus=[0], health="/", start_timeout_s=30,
+                  command=f"sleep 300 & echo $! > {pidfile}; exec {sys.executable} -m http.server {port} --bind 127.0.0.1 --directory {tmp_path}")
+    seen = {}
+
+    def hold():
+        if "leader" not in seen:
+            seen["leader"] = runner.read_state(tmp_path / "logs")["services"]["a"]["pid"]
+            seen["worker"] = int(pidfile.read_text())
+            os.kill(seen["leader"], signal.SIGKILL)  # only the main process, as `kill -9 <pid>` does
+            seen["until"] = time.monotonic() + 15
+            return True
+        if runner.pid_alive(seen["worker"]) and time.monotonic() < seen["until"]:
+            time.sleep(0.1)
+            return True
+        seen["worker_alive_while_holding"] = runner.pid_alive(seen["worker"])
+        return False
+
+    lines = []
+    runner.run_up(Config(services=[svc]), tmp_path / "logs", hold=hold, out=lines.append, health_interval=0.2, grace=5)
+    assert seen["worker_alive_while_holding"] is False, "the worker was left running, still holding its memory"
+    assert any(l.startswith("warning: a exited with status -9") for l in lines)
+    assert "  stopped what was left of a" in lines
+
+
+def test_a_service_that_leaves_nothing_behind_gets_no_extra_message(tmp_path):
+    config = Config(services=[one_request_service("a", free_port(), tmp_path)])  # answers one request, then exits cleanly
+    lines = []
+
+    def hold():
+        time.sleep(0.2)
+        return not any(l.startswith("warning: a exited") for l in lines)
+
+    runner.run_up(config, tmp_path / "logs", hold=hold, out=lines.append, health_interval=0.2, grace=5)
+    assert not any("what was left" in l for l in lines)
+
+
+# --- the PID column shows the process ids that hold the GPU memory ------------------------------------------------------
+
+
+def row(**fields):
+    defaults = dict(name="a", state="running", pid=100, port=1, health="HTTP 200")
+    return runner.ServiceRow(**{**defaults, **fields})
+
+
+def test_the_shown_pid_is_the_gpu_process_when_there_is_one():
+    assert row(gpu_pids=(235930,), gpu_known=True).shown_pid == "235930"
+    assert row(gpu_pids=(555362, 555363), gpu_known=True).shown_pid == "555362, 555363"
+    assert row(gpu_pids=(1, 2, 3, 4, 5), gpu_known=True).shown_pid == "1, 2, 3, …"
+
+
+def test_the_shown_pid_is_a_dash_until_the_service_has_a_gpu_process():
+    assert row(state="starting", gpu_pids=(), gpu_known=True).shown_pid == "-"  # loading: the engine has not claimed the GPU yet
+    assert row(state="pending", pid=None, gpu_known=True).shown_pid == "-"
+
+
+def test_the_shown_pid_falls_back_to_the_process_mesh_started_only_when_nvidia_smi_cannot_be_read():
+    assert row(gpu_known=False).shown_pid == "100"
+    assert row(gpu_known=False, pid=None).shown_pid == "-"
+
+
+def test_service_rows_attach_the_gpu_pids_of_each_service(sleeper):
+    state = {"services": {
+        "llm": {"status": "running", "pid": sleeper.pid, "port": 1, "health": "/"},
+        "idle": {"status": "running", "pid": sleeper.pid, "port": 2, "health": "/"},
+    }}
+    llm, idle = runner.service_rows(state, probe_fn=fake_probe(), gpu_pids={"llm": [555362, 555363]})
+    assert (llm.shown_pid, idle.shown_pid) == ("555362, 555363", "-")
+    unknown = runner.service_rows(state, probe_fn=fake_probe(), gpu_pids=None)
+    assert unknown[0].shown_pid == str(sleeper.pid)  # no nvidia-smi: the only id there is
+
+
+# --- how long each service gets to stop before it is killed -------------------------------------------------------------
+
+
+def stubborn_http_service(name, port, directory, stop_timeout_s):
+    """Ignores SIGTERM, so it only goes away when it is killed once its stop timeout has run out."""
+    return Service(name=name, port=port, gpus=[0], health="/", start_timeout_s=30, stop_timeout_s=stop_timeout_s,
+                   command=f"trap '' TERM; exec {sys.executable} -m http.server {port} --bind 127.0.0.1 --directory {directory}")
+
+
+def test_each_service_gets_its_own_stop_timeout(tmp_path):
+    config = Config(services=[stubborn_http_service("a", free_port(), tmp_path, 1), http_service("b", free_port(), tmp_path)])
+    lines = []
+    began = time.monotonic()
+    runner.run_up(config, tmp_path / "logs", hold=lambda: False, out=lines.append, health_interval=0.2)  # no grace argument
+    assert "  stopped a (force-killed after 1s)" in lines
+    assert time.monotonic() - began < 15  # not the default 30 seconds
+
+
+def test_a_longer_stop_timeout_lets_a_slow_service_finish_instead_of_being_killed(tmp_path):
+    marker = tmp_path / "finished"
+    slow = Service(name="a", port=free_port(), gpus=[0], health="/", start_timeout_s=30, stop_timeout_s=10,
+                   command=f"trap 'sleep 2; touch {marker}; exit 0' TERM; {sys.executable} -m http.server {{port}} --bind 127.0.0.1 --directory {tmp_path} & wait")
+    slow.command = slow.command.replace("{port}", str(slow.port))
+    lines = []
+    runner.run_up(Config(services=[slow]), tmp_path / "logs", hold=lambda: False, out=lines.append, health_interval=0.2)
+    assert marker.exists()  # it had time to finish its own shutdown
+    assert not any("force-killed" in l for l in lines)
+
+
+def test_the_grace_argument_still_overrides_the_per_service_value(tmp_path):
+    config = Config(services=[stubborn_http_service("a", free_port(), tmp_path, 25)])
+    lines = []
+    runner.run_up(config, tmp_path / "logs", hold=lambda: False, out=lines.append, health_interval=0.2, grace=2)
+    assert "  stopped a (force-killed after 2s)" in lines
+
+
+def test_the_state_records_each_services_stop_timeout(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path, stop_timeout_s=7)])
+    seen = {}
+
+    def hold():
+        seen["state"] = runner.read_state(tmp_path / "logs")
+        return False
+
+    runner.run_up(config, tmp_path / "logs", hold=hold, out=lambda _: None, health_interval=0.2, grace=5)
+    assert seen["state"]["services"]["a"]["stop_timeout_s"] == 7
+
+
+def test_mesh_down_uses_the_recorded_stop_timeout_when_mesh_up_is_gone(tmp_path):
+    orphan = start_stubborn(tmp_path)
+    threading.Thread(target=orphan.wait, daemon=True).start()  # in real use init reaps an orphan
+    runner.write_state(tmp_path, {"controller_pid": 999999, "services": {
+        "a": {"status": "running", "pid": orphan.pid, "started": runner.process_start(orphan.pid), "port": 1, "health": "/",
+              "stop_timeout_s": 1}}})
+    lines = []
+    began = time.monotonic()
+    assert runner.stop_from_state(tmp_path, out=lines.append) is True  # no grace argument either
+    assert "  stopped a (force-killed after 1s)" in lines
+    assert time.monotonic() - began < 15
+
+
+def test_a_state_file_from_an_older_version_still_gets_the_default_timeout(tmp_path):
+    orphan = start_group("exec sleep 60")
+    threading.Thread(target=orphan.wait, daemon=True).start()
+    runner.write_state(tmp_path, {"controller_pid": 999999, "services": {
+        "a": {"status": "running", "pid": orphan.pid, "port": 1, "health": "/"}}})  # no stop_timeout_s recorded
+    assert runner.stop_from_state(tmp_path, out=lambda _: None) is True
+    assert not runner.group_alive(orphan.pid)
+
+
+def test_mesh_down_waits_for_mesh_up_long_enough_to_cover_the_services_stop_timeouts():
+    assert runner.mesh_up_wait(None, [30, 30]) == 90.0  # never less than the usual 90 seconds
+    assert runner.mesh_up_wait(None, [120, 120, 120]) == 390.0  # their sum, plus 30 seconds to spare
+    assert runner.mesh_up_wait(5.0, [120, 120, 120]) == 5.0  # an explicit value is used as given
+
+
+def worker_running(pid):
+    """True if the process exists and is not just a zombie waiting to be collected."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return True
+
+
+def test_what_a_dead_service_leaves_behind_is_stopped_within_its_own_timeout(tmp_path):
+    port, pidfile = free_port(), tmp_path / "worker.pid"
+    svc = Service(name="a", port=port, gpus=[0], health="/", start_timeout_s=30, stop_timeout_s=1,
+                  command=f"trap '' TERM; sleep 300 & echo $! > {pidfile}; exec {sys.executable} -m http.server {port} --bind 127.0.0.1 --directory {tmp_path}")
+    seen = {}
+
+    def hold():
+        if "leader" not in seen:
+            seen["leader"] = runner.read_state(tmp_path / "logs")["services"]["a"]["pid"]
+            seen["worker"] = int(pidfile.read_text())
+            os.kill(seen["leader"], signal.SIGKILL)
+            seen["until"] = time.monotonic() + 10  # far less than the default 30 seconds
+            return True
+        if worker_running(seen["worker"]) and time.monotonic() < seen["until"]:
+            time.sleep(0.1)
+            return True
+        seen["still_there"] = worker_running(seen["worker"])
+        return False
+
+    runner.run_up(Config(services=[svc]), tmp_path / "logs", hold=hold, out=lambda _: None, health_interval=0.2)
+    assert seen["still_there"] is False
+
+
+def test_a_service_without_its_own_timeout_keeps_the_default_even_after_one_that_has_one(tmp_path):
+    first, second = start_stubborn(tmp_path), start_stubborn(tmp_path)
+    lines = []
+    runner.stop_all([("a", first.pid, None, first), ("b", second.pid, None, second)], 2, lines.append, graces={"a": 1})
+    assert "  stopped a (force-killed after 1s)" in lines
+    assert "  stopped b (force-killed after 2s)" in lines  # not 1s, left over from a

@@ -218,12 +218,28 @@ class ServiceRow:
     health: str  # "HTTP 200", "not answering", or "-" when there is no process to ask
     error: str = ""
     up: bool = False  # the answer counts as healthy (see is_up)
+    gpu_pids: tuple[int, ...] = ()  # the processes that hold this service's GPU memory, as nvidia-smi lists them
+    gpu_known: bool = False  # False when nvidia-smi could not be read, so gpu_pids says nothing
+
+    @property
+    def shown_pid(self) -> str:
+        """What the PID column shows: the GPU processes, `-` until there are any, or (no nvidia-smi) the launcher's pid."""
+        if self.gpu_pids:
+            return ", ".join(str(pid) for pid in self.gpu_pids[:3]) + (", …" if len(self.gpu_pids) > 3 else "")
+        if not self.gpu_known and self.pid:
+            return str(self.pid)  # nothing to match against, so the process mesh started is the only id there is
+        return "-"
 
 
-def service_rows(state: dict, probe_fn: Callable[..., int | None] = probe) -> list[ServiceRow]:
+def service_rows(
+    state: dict,
+    probe_fn: Callable[..., int | None] = probe,
+    gpu_pids: dict[str, list[int]] | None = None,
+) -> list[ServiceRow]:
     """The services in the state file, in start order, with what is true now: is the process there, does it answer.
 
     The health checks run at the same time with a short timeout, so a few silent services cannot freeze the screen.
+    `gpu_pids` maps a service to the ids of its GPU processes, or is None when nvidia-smi could not be read.
     """
     entries = list(state.get("services", {}).items())
     alive = {name: still_ours(info) for name, info in entries}
@@ -239,7 +255,8 @@ def service_rows(state: dict, probe_fn: Callable[..., int | None] = probe) -> li
         health = "-" if name not in codes else (f"HTTP {code}" if code is not None else "not answering")
         if recorded == "starting" and is_up(code):  # `mesh up` records it at its next check; this is already true
             recorded = "running"
-        rows.append(ServiceRow(name, recorded, info.get("pid"), info["port"], health, error, is_up(code)))
+        pids = tuple((gpu_pids or {}).get(name, ()))
+        rows.append(ServiceRow(name, recorded, info.get("pid"), info["port"], health, error, is_up(code), pids, gpu_pids is not None))
     return rows
 
 
@@ -368,20 +385,25 @@ def stop_all(
     entries: list[tuple[str, int, str | None, subprocess.Popen | None]],
     grace: float,
     out: Callable[[str], None],
+    graces: dict[str, float] | None = None,
 ) -> int:
-    """Stop services in the order given, printing progress. Returns how many are still running afterwards."""
+    """Stop services in the order given, printing progress. Returns how many are still running afterwards.
+
+    `grace` is how long each service gets to stop before it is killed; `graces` gives some services their own.
+    """
     total = len(entries)
     out(f"Stopping {_count(total)}...")
     stuck = 0
     for name, pid, stop_command, proc in entries:
         out(f"  stopping {name} ...")
         began = time.monotonic()
-        result = stop_process(pid, stop_command, grace, proc)
+        limit = (graces or {}).get(name, grace)
+        result = stop_process(pid, stop_command, limit, proc)
         seconds = time.monotonic() - began
         if result == "gone":
             out(f"  {name} was already stopped")
         elif result == "killed":
-            out(f"  stopped {name} (force-killed after {grace:g}s)")
+            out(f"  stopped {name} (force-killed after {limit:g}s)")
         elif result == "denied":
             out(f"  could not stop {name}: permission denied (pid {pid} belongs to another user?)")
         else:
@@ -419,14 +441,15 @@ def run_up(
     hold: Callable[[], bool] | None = None,
     out: Callable[[str], None] = _say,
     health_interval: float = 2.0,
-    grace: float = 30.0,
+    grace: float | None = None,
     progress: Callable[[str | None, float, str], None] | None = None,
 ) -> None:
     """Start every service in order. Blocks (while `hold()` is true, default forever), then stops everything.
 
     `progress(name, seconds, last_log_line)` is called while a service loads; `progress(None, 0, "")` when it stops.
     `snapshot()` returns the memory used on each GPU, or None when it cannot be read: that only means "memory it
-    added: unavailable" for that service, and never stops the start.
+    added: unavailable" for that service, and never stops the start. Each service gets its own `stop_timeout_s` to stop
+    before it is killed; `grace`, if given, replaces that for every service.
     """
     missing = [s.name for s in config.services if not s.command]
     if missing:
@@ -443,7 +466,8 @@ def run_up(
         "controller_started": process_start(os.getpid()),
         "services": {  # every service is listed from the start, in start order; pid is set once it has a process
             svc.name: {"status": "pending", "pid": None, "port": svc.port, "health": svc.health, "stop": svc.stop,
-                       "command": svc.command, "log": str(log_path(log_dir, svc.name)), "error": None}
+                       "stop_timeout_s": svc.stop_timeout_s, "command": svc.command, "log": str(log_path(log_dir, svc.name)),
+                       "error": None}
             for svc in config.services
         },
     }
@@ -493,7 +517,13 @@ def run_up(
                 if proc.poll() is not None and svc.name not in reported:
                     reported.add(svc.name)
                     mark(log_dir, state, svc.name, status="failed", error=f"exited with status {proc.returncode}")
-                    out(f"warning: {svc.name} exited with status {proc.returncode}; see {log_path(log_dir, svc.name)}")
+                    out(f"warning: {svc.name} exited with status {proc.returncode}; see {tidy(log_path(log_dir, svc.name))}")
+                    # Its main process is gone, but what it started (a vLLM worker, a container) can still hold GPU memory.
+                    left = stop_process(proc.pid, svc.stop, svc.stop_timeout_s if grace is None else grace, proc)
+                    if left in ("stopped", "killed"):
+                        out(f"  stopped what was left of {svc.name}")
+                    elif left == "denied":
+                        out(f"  could not stop what was left of {svc.name}: permission denied (pid {proc.pid} belongs to another user?)")
     except KeyboardInterrupt:
         out("")  # Ctrl+C leaves the cursor after "^C"
     finally:
@@ -509,7 +539,8 @@ def run_up(
             except OSError:
                 pass  # a full disk must not stop the cleanup below
             if started:
-                stop_all([(svc.name, proc.pid, svc.stop, proc) for svc, proc in reversed(started)], grace, out)
+                stop_all([(svc.name, proc.pid, svc.stop, proc) for svc, proc in reversed(started)], 30.0 if grace is None else grace, out,
+                         None if grace is not None else {svc.name: svc.stop_timeout_s for svc, _ in started})
             clear_state(log_dir)
         finally:
             for sig, handler in restore:
@@ -518,14 +549,27 @@ def run_up(
                 signal.signal(signal.SIGTERM, previous_handler)
 
 
+def mesh_up_wait(wait: float | None, graces: list[float]) -> float:
+    """How long `mesh down` gives `mesh up` to finish stopping: 90 seconds, or more if the services need it.
+
+    `mesh up` stops the services one after the other, each with its own stop timeout, so giving up on it after 90
+    seconds would start killing services that are still shutting down properly.
+    """
+    return wait if wait is not None else max(90.0, sum(graces) + 30.0)
+
+
 def stop_from_state(
     log_dir: Path,
     out: Callable[[str], None] = _say,
-    wait: float = 90.0,
+    wait: float | None = None,
     poll: float = 0.5,
-    grace: float = 30.0,
+    grace: float | None = None,
 ) -> bool:
-    """`mesh down`: stop a stack started by another `mesh up` process. Returns False if nothing was running."""
+    """`mesh down`: stop a stack started by another `mesh up` process. Returns False if nothing was running.
+
+    Each service gets the `stop_timeout_s` recorded in the state file (30 seconds for a file from an older version);
+    `grace`, if given, replaces that for every service.
+    """
     state = read_state(log_dir)
     if not state:
         return False
@@ -537,6 +581,7 @@ def stop_from_state(
     if not services and not controller_alive:  # nothing was ever started, so there is nothing to stop
         clear_state(log_dir)
         return False
+    graces = {name: float(grace if grace is not None else info.get("stop_timeout_s", 30)) for name, info in services}
     if controller_alive:
         out(f"Asking mesh up (pid {controller}) to stop {_count(len(services))}...")
         try:
@@ -546,7 +591,7 @@ def stop_from_state(
         else:
             remaining = [name for name, _ in reversed(services)]
             pids = {name: info["pid"] for name, info in services}
-            deadline = time.monotonic() + wait
+            deadline = time.monotonic() + mesh_up_wait(wait, list(graces.values()))
             while time.monotonic() < deadline:
                 finished = read_state(log_dir) is None
                 for name in list(remaining):  # report each service as it disappears (they stop in reverse order)
@@ -561,6 +606,6 @@ def stop_from_state(
             services = [(name, info) for name, info in services if name in remaining]
     # A pid that now belongs to another program is passed as 0, so only its stop command (e.g. `docker stop NAME`) runs.
     stop_all([(name, info["pid"] if is_ours(info["pid"], info.get("started")) else 0, info.get("stop"), None)
-              for name, info in reversed(services)], grace, out)
+              for name, info in reversed(services)], 30.0, out, graces)
     clear_state(log_dir)
     return True

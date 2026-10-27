@@ -12,3 +12,6 @@ reddit threads/
 local/
 /*.png
 /Screenshot*
+
+# Local testing tools, kept out of the repository
+/scripts/

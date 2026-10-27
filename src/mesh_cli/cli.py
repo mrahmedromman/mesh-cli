@@ -222,8 +222,16 @@ def _cmd_down(args: argparse.Namespace) -> int:
     return 0
 
 
+def _gpu_pids(log_dir: Path) -> dict[str, list[int]] | None:
+    """The GPU process ids of each service, or None if nvidia-smi cannot be read (then there is nothing to match)."""
+    try:
+        return holders.lookup_service_pids(log_dir)
+    except (GpuError, OSError):
+        return None
+
+
 def _status_text(rows: list[runner.ServiceRow]) -> str:
-    lines = [f"{r.name:<12} {r.state:<9} pid {r.pid if r.pid else '-':<8} port {r.port:<6} {r.health}" for r in rows]
+    lines = [f"{r.name:<12} {r.state:<9} pid {r.shown_pid:<8} port {r.port:<6} {r.health}" for r in rows]
     lines += [f"  {r.name}: {r.error}  (see: mesh logs {r.name})" for r in rows if r.error]
     return "\n".join(lines)
 
@@ -237,12 +245,18 @@ def _cmd_status(args: argparse.Namespace) -> int:
     if ui.fancy() and sys.stdin.isatty():  # at a terminal the view keeps itself up to date; q quits
         watch.watch(log_dir)
         return 0
-    rows = runner.service_rows(state)
+    rows = runner.service_rows(state, gpu_pids=_gpu_pids(log_dir))
     if ui.fancy():
         ui.print_status(rows)
     else:
         print(_status_text(rows))
     return 0
+
+
+def _service_pid(log_dir: Path, name: str) -> int | None:
+    """The process id mesh recorded for a service, or None while it is not started or no stack is recorded."""
+    services = (runner.read_state(log_dir) or {}).get("services") or {}
+    return (services.get(name) or {}).get("pid") or None
 
 
 def _cmd_logs(args: argparse.Namespace) -> int:
@@ -269,14 +283,20 @@ def _cmd_logs(args: argparse.Namespace) -> int:
             if not args.follow:
                 return 0
             size = os.fstat(handle.fileno()).st_size
+            known_pid = _service_pid(log_dir, args.service)
             while True:
+                pid = _service_pid(log_dir, args.service)
+                if pid and pid != known_pid:
+                    handle.seek(0)  # the service was started again: `mesh up` emptied the log first, so read it from the top
+                if pid:
+                    known_pid = pid
                 chunk = handle.read()
                 now = os.fstat(handle.fileno()).st_size
                 if chunk:
                     sys.stdout.write(chunk)
                     sys.stdout.flush()
                 elif now < size:
-                    handle.seek(0)  # the next `mesh up` emptied this file and started the log over: read it from the top
+                    handle.seek(0)  # the file shrank without a new process (it was emptied by hand): read it from the top
                 else:
                     time.sleep(0.5)
                 size = now

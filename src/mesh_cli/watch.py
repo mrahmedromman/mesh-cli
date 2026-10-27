@@ -21,7 +21,7 @@ from rich.console import Group
 from rich.live import Live
 from rich.text import Text
 
-from . import runner, settings, ui
+from . import holders, runner, settings, ui
 
 QUIT_KEYS = b"qQ"
 
@@ -31,6 +31,7 @@ def poll(
     show: Callable[[list[runner.ServiceRow]], None],
     wait: Callable[[float], bool],
     interval: float = 1.0,
+    pids: Callable[[], dict[str, list[int]] | None] | None = None,
 ) -> tuple[list[runner.ServiceRow], bool]:
     """Draw the status again and again. Returns the last rows and whether the user quit (False: the stack stopped)."""
     rows: list[runner.ServiceRow] = []
@@ -38,7 +39,7 @@ def poll(
         state = runner.read_state(log_dir)
         if state is None:  # `mesh up` finished and removed its state file
             return rows, False
-        rows = runner.service_rows(state)
+        rows = runner.service_rows(state, gpu_pids=pids() if pids else None)
         show(rows)
         if wait(interval):
             return rows, True
@@ -46,7 +47,7 @@ def poll(
 
 def stopped(rows: list[runner.ServiceRow]) -> list[runner.ServiceRow]:
     """The last rows once the stack is gone: everything is stopped, except what had failed (it keeps its reason)."""
-    return [replace(r, state="failed" if r.state == "failed" else "stopped", pid=None, health="-") for r in rows]
+    return [replace(r, state="failed" if r.state == "failed" else "stopped", pid=None, health="-", gpu_pids=()) for r in rows]
 
 
 def quit_pressed(fd: int, seconds: float) -> bool:
@@ -85,9 +86,15 @@ def watch(log_dir: Path, interval: float = 1.0) -> None:
     quit_by_user = False
     try:
         with single_keys(fd), Live(console=con, screen=True, auto_refresh=False) as live:
-            rows, quit_by_user = poll(log_dir, lambda r: live.update(frame(r), refresh=True), lambda s: quit_pressed(fd, s), interval)
+            rows, quit_by_user = poll(log_dir, lambda r: live.update(frame(r), refresh=True), lambda s: quit_pressed(fd, s), interval,
+                                      pids=holders.ServicePids(log_dir).get)
     except KeyboardInterrupt:
         return
-    if rows and not quit_by_user:  # leave the last picture on screen: the alternate screen has just been closed
+    if not rows:
+        return
+    # The alternate screen has just been closed and took the table with it, so print the last one where it can be read.
+    if quit_by_user:
+        ui.print_status(rows, con)  # as it was when you quit, so the PIDs are still there to copy
+    else:
         ui.print_status(stopped(rows), con)
         con.print("The stack has stopped.", style="bold")

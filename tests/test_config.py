@@ -70,3 +70,18 @@ def test_the_examples_do_not_use_the_removed_field():
 
     for example in pathlib.Path("examples").glob("*.yaml"):
         assert "runtime:" not in example.read_text(), example
+
+
+def test_stop_timeout_defaults_to_30_seconds_and_can_be_set_per_service(tmp_path):
+    path = write(tmp_path, "services:\n"
+                           "  - {name: a, port: 1, gpus: [0]}\n"
+                           "  - {name: b, port: 2, gpus: [0], stop_timeout_s: 120}\n")
+    a, b = load_config(path).services
+    assert (a.stop_timeout_s, b.stop_timeout_s) == (30, 120)
+
+
+@pytest.mark.parametrize("value", [0, -5])
+def test_stop_timeout_must_be_positive(tmp_path, value):
+    path = write(tmp_path, f"services:\n  - {{name: a, port: 1, gpus: [0], stop_timeout_s: {value}}}\n")
+    with pytest.raises(ConfigError, match="stop_timeout_s"):
+        load_config(path)
