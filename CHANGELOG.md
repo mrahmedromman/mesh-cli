@@ -17,6 +17,11 @@ All notable changes to this project are recorded here. The format follows
   that grew: the sign that the service's command is not using the GPU the plan assumed. The docs now explain
   that `gpus` only informs the plan and the command must pin the GPU itself.
 
+### Removed
+- The `runtime` service field. It accepted `command` or `docker` but nothing read it; a Docker service is started
+  by its `command` like any other. A config that still sets it now gets an error that says to delete the line.
+  The Docker lines were also removed from `examples/dual-gpu.yaml`.
+
 ### Fixed
 - `state.json` copies each service's full command (which can contain tokens such as `HF_TOKEN`), and it and the
   logs were readable by other users on the machine. They are now written with mode `600`, and a folder that `mesh`

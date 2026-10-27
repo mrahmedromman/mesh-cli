@@ -54,3 +54,19 @@ def test_unknown_field_rejected(tmp_path):
 def test_missing_file(tmp_path):
     with pytest.raises(ConfigError, match="cannot read"):
         load_config(tmp_path / "nope.yaml")
+
+
+def test_the_removed_runtime_field_is_explained_not_just_rejected(tmp_path):
+    path = write(tmp_path, "services:\n  - {name: a, port: 1, gpus: [0], runtime: docker}\n")
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(path)
+    message = str(excinfo.value)
+    assert "services.0.runtime" in message and "removed" in message and "delete the line" in message
+    assert "command" in message  # a Docker service is started by its command
+
+
+def test_the_examples_do_not_use_the_removed_field():
+    import pathlib
+
+    for example in pathlib.Path("examples").glob("*.yaml"):
+        assert "runtime:" not in example.read_text(), example

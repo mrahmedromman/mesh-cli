@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -26,7 +26,6 @@ class Service(BaseModel):
     name: str = Field(min_length=1)
     port: int = Field(ge=1, le=65535)
     gpus: list[int] = Field(min_length=1)
-    runtime: Literal["command", "docker"] = "command"
     # vLLM-style fraction of each GPU's total memory.
     gpu_memory_utilization: float | None = Field(default=None, gt=0, le=1)
     # Real memory the service held per GPU in a previous run (from nvidia-smi).
@@ -91,6 +90,8 @@ def _field_hint(error: Mapping[str, Any]) -> str:
     if error.get("type") != "extra_forbidden":
         return ""
     loc = error["loc"]
+    if loc[-1] == "runtime":  # accepted but ignored until 0.1.0; the examples of that release set it
+        return ". It was removed in 0.1.1 and never did anything: delete the line (a Docker service is started by its `command`)"
     model = Service if "services" in loc[:-1] else Config
     hint = did_you_mean(str(loc[-1]), model.model_fields)
     return f". {hint.strip()}" if hint else ""
