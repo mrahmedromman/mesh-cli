@@ -2,7 +2,10 @@
 
 import os
 import socket
+import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -303,3 +306,166 @@ def test_a_second_ctrl_c_during_shutdown_does_not_abort_the_cleanup(tmp_path):
     assert "Traceback" not in output and "All services stopped." in output
     assert runner.probe(port, "/") is None
     assert runner.read_state(log_dir) is None
+
+
+# --- the state file lists every service and tracks its status ---------------------------------------------------
+
+
+def one_request_service(name, port, directory):
+    """Answers a single request (the health check) and then exits, like a service that crashes after it is up."""
+    code = (
+        "import http.server as h; "
+        f"s = h.HTTPServer(('127.0.0.1', {port}), h.SimpleHTTPRequestHandler); s.handle_request()"
+    )
+    return Service(name=name, port=port, gpus=[0], health="/", start_timeout_s=30, command=f"cd {directory}; exec {sys.executable} -c \"{code}\"")
+
+
+def test_state_lists_every_service_before_the_first_one_starts(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path), http_service("b", free_port(), tmp_path)])
+    seen = []
+
+    def out(line):
+        if "starting a" in line:
+            seen.append(runner.read_state(tmp_path / "logs"))
+
+    runner.run_up(config, tmp_path / "logs", hold=lambda: False, out=out, health_interval=0.2, grace=5)
+    services = seen[0]["services"]
+    assert list(services) == ["a", "b"]  # in start order
+    assert [s["status"] for s in services.values()] == ["pending", "pending"]
+    assert [s["pid"] for s in services.values()] == [None, None]
+    assert services["a"]["port"] and services["a"]["health"] == "/"
+
+
+def test_a_service_goes_from_pending_to_starting_to_running(tmp_path):
+    slow = Service(name="a", port=free_port(), gpus=[0], health="/", start_timeout_s=30,
+                   command=f"sleep 1; exec {sys.executable} -m http.server {{port}} --bind 127.0.0.1 --directory {tmp_path}")
+    slow.command = slow.command.replace("{port}", str(slow.port))
+    config = Config(services=[slow, http_service("b", free_port(), tmp_path)])
+    states = {}
+
+    def progress(name, seconds, line):
+        if name == "a" and "loading" not in states:
+            states["loading"] = runner.read_state(tmp_path / "logs")["services"]["a"]
+
+    def out(line):
+        if "starting b" in line:
+            states["b_next"] = runner.read_state(tmp_path / "logs")["services"]
+
+    def hold():
+        states["done"] = runner.read_state(tmp_path / "logs")["services"]
+        return False
+
+    runner.run_up(config, tmp_path / "logs", hold=hold, out=out, progress=progress, health_interval=0.2, grace=5)
+    assert states["loading"]["status"] == "starting" and states["loading"]["pid"]
+    assert states["b_next"]["a"]["status"] == "running" and states["b_next"]["b"]["status"] == "pending"
+    assert states["b_next"]["b"]["pid"] is None
+    assert [s["status"] for s in states["done"].values()] == ["running", "running"]
+    assert all(s["pid"] for s in states["done"].values())
+
+
+def test_a_service_that_fails_to_start_is_recorded_as_failed_while_the_rest_stop(tmp_path):
+    bad = Service(name="bad", port=free_port(), gpus=[0], command="echo boom; exit 3", start_timeout_s=30)
+    config = Config(services=[http_service("a", free_port(), tmp_path), bad, http_service("later", free_port(), tmp_path)])
+    seen = []
+
+    def out(line):
+        if line.startswith("Stopping"):
+            seen.append(runner.read_state(tmp_path / "logs")["services"])
+
+    with pytest.raises(runner.ServiceExited):
+        runner.run_up(config, tmp_path / "logs", out=out, health_interval=0.2, grace=5)
+    services = seen[0]
+    assert services["bad"]["status"] == "failed" and "status 3" in services["bad"]["error"]
+    assert services["a"]["status"] == "stopping"
+    assert services["later"]["status"] == "pending" and services["later"]["pid"] is None
+
+
+def test_a_service_that_exits_after_it_was_up_is_marked_failed(tmp_path):
+    config = Config(services=[one_request_service("a", free_port(), tmp_path)])
+    seen = {}
+
+    def hold():
+        service = runner.read_state(tmp_path / "logs")["services"]["a"]
+        if service["status"] == "failed":
+            seen["service"] = service
+            return False
+        time.sleep(0.1)
+        return True
+
+    runner.run_up(config, tmp_path / "logs", hold=hold, out=lambda _: None, health_interval=0.2, grace=5)
+    assert "exited with status" in seen["service"]["error"]
+
+
+def test_services_that_never_started_have_nothing_to_stop(tmp_path):
+    runner.write_state(tmp_path, {"controller_pid": 999999, "services": {
+        "waiting": {"status": "pending", "pid": None, "port": 1, "health": "/"},
+    }})
+    assert runner.running_services(tmp_path) == []
+    lines = []
+    assert not runner.stop_from_state(tmp_path, out=lines.append, grace=1)
+    assert lines == [] and runner.read_state(tmp_path) is None
+
+
+# --- the rows `mesh status` shows ---------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sleeper():
+    proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    yield proc
+    proc.kill()
+    proc.wait()
+
+
+def fake_probe(code=200):
+    return lambda port, path, timeout=1.0: code
+
+
+def test_rows_show_pending_services_with_a_dash_instead_of_a_process(tmp_path):
+    state = {"services": {"a": {"status": "pending", "pid": None, "port": 8001, "health": "/"}}}
+    [row] = runner.service_rows(state, probe_fn=fake_probe())
+    assert (row.name, row.state, row.pid, row.port, row.health) == ("a", "pending", None, 8001, "-")
+
+
+def test_rows_probe_the_services_that_have_a_process(sleeper):
+    state = {"services": {
+        "up": {"status": "running", "pid": sleeper.pid, "port": 8001, "health": "/"},
+        "loading": {"status": "starting", "pid": sleeper.pid, "port": 8002, "health": "/"},
+    }}
+    rows = runner.service_rows(state, probe_fn=lambda port, path, timeout=1.0: 200 if port == 8001 else None)
+    assert [(r.state, r.health) for r in rows] == [("running", "HTTP 200"), ("starting", "not answering")]
+
+
+def test_a_running_service_whose_process_is_gone_shows_as_failed():
+    state = {"services": {"a": {"status": "running", "pid": 2_000_000_000, "port": 1, "health": "/"}}}
+    [row] = runner.service_rows(state, probe_fn=fake_probe())
+    assert row.state == "failed" and row.health == "-" and "gone" in row.error
+
+
+def test_a_state_file_from_0_1_0_has_no_status_and_counts_as_running(sleeper):
+    state = {"services": {"a": {"pid": sleeper.pid, "port": 1, "health": "/"}}}
+    [row] = runner.service_rows(state, probe_fn=fake_probe())
+    assert row.state == "running"
+
+
+def test_the_error_of_a_failed_service_is_kept():
+    state = {"services": {"a": {"status": "failed", "pid": None, "port": 1, "health": "/", "error": "a exited with status 3"}}}
+    [row] = runner.service_rows(state, probe_fn=fake_probe())
+    assert row.state == "failed" and row.error == "a exited with status 3"
+
+
+def test_services_are_probed_at_the_same_time(sleeper):
+    barrier = threading.Barrier(4)  # one at a time would never get all four to the barrier
+
+    def probe_together(port, path, timeout=1.0):
+        barrier.wait(timeout=5)
+        return 200
+
+    state = {"services": {f"s{i}": {"status": "running", "pid": sleeper.pid, "port": i, "health": "/"} for i in range(4)}}
+    assert [r.health for r in runner.service_rows(state, probe_fn=probe_together)] == ["HTTP 200"] * 4
+
+
+def test_a_starting_service_shows_as_running_as_soon_as_it_answers(sleeper):
+    state = {"services": {"a": {"status": "starting", "pid": sleeper.pid, "port": 1, "health": "/"}}}
+    assert runner.service_rows(state, probe_fn=fake_probe(200))[0].state == "running"
+    assert runner.service_rows(state, probe_fn=fake_probe(None))[0].state == "starting"

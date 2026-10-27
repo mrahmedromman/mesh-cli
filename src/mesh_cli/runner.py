@@ -15,6 +15,8 @@ import urllib.error
 import urllib.request
 from collections import deque
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Config, Service
@@ -71,6 +73,11 @@ def probe(port: int, path: str, timeout: float = 3.0) -> int | None:
         return None
 
 
+def is_up(code: int | None) -> bool:
+    """Whether a health probe's answer means the service is up. Any HTTP response does, because the server is listening."""
+    return code is not None
+
+
 def group_alive(pid: int) -> bool:
     try:
         os.killpg(pid, 0)
@@ -95,6 +102,12 @@ def write_state(log_dir: Path, state: dict) -> None:
     os.replace(tmp, target)
 
 
+def mark(log_dir: Path, state: dict, name: str, **fields) -> None:
+    """Change one service's entry in the state file, which `mesh status` reads while `mesh up` runs."""
+    state["services"][name].update(fields)
+    write_state(log_dir, state)
+
+
 def clear_state(log_dir: Path) -> None:
     try:
         (Path(log_dir) / STATE_FILE).unlink()
@@ -114,7 +127,42 @@ def known_services(log_dir: Path) -> list[str]:
 
 def running_services(log_dir: Path) -> list[str]:
     state = read_state(log_dir) or {}
-    return [name for name, info in state.get("services", {}).items() if group_alive(info["pid"])]
+    return [name for name, info in state.get("services", {}).items() if info.get("pid") and group_alive(info["pid"])]
+
+
+@dataclass(frozen=True)
+class ServiceRow:
+    """One line of `mesh status`."""
+
+    name: str
+    state: str  # pending | starting | running | failed | stopping
+    pid: int | None
+    port: int
+    health: str  # "HTTP 200", "not answering", or "-" when there is no process to ask
+    error: str = ""
+
+
+def service_rows(state: dict, probe_fn: Callable[..., int | None] = probe) -> list[ServiceRow]:
+    """The services in the state file, in start order, with what is true now: is the process there, does it answer.
+
+    The health checks run at the same time with a short timeout, so a few silent services cannot freeze the screen.
+    """
+    entries = list(state.get("services", {}).items())
+    alive = {name: bool(info.get("pid")) and group_alive(info["pid"]) for name, info in entries}
+    with ThreadPoolExecutor(max_workers=max(1, len(entries))) as pool:
+        codes = {name: pool.submit(probe_fn, info["port"], info["health"], 1.0) for name, info in entries if alive[name]}
+    rows = []
+    for name, info in entries:
+        recorded = info.get("status", "running")  # a state file written by 0.1.0 has no status
+        error = info.get("error") or ""
+        if recorded in ("starting", "running") and not alive[name]:
+            recorded, error = "failed", error or "the process is gone"
+        code = codes[name].result() if name in codes else None
+        health = "-" if name not in codes else (f"HTTP {code}" if code is not None else "not answering")
+        if recorded == "starting" and is_up(code):  # `mesh up` records it at its next check; this is already true
+            recorded = "running"
+        rows.append(ServiceRow(name, recorded, info.get("pid"), info["port"], health, error))
+    return rows
 
 
 def start_service(svc: Service, log_dir: Path) -> subprocess.Popen:
@@ -150,7 +198,7 @@ def wait_healthy(
                 f"{svc.name} exited with status {code} before it became healthy. Last log lines:\n"
                 + tail_lines(log_file, 20)
             )
-        if probe_fn(svc.port, svc.health) is not None:
+        if is_up(probe_fn(svc.port, svc.health)):
             return
         if clock() > deadline:
             raise StartTimeout(
@@ -295,28 +343,39 @@ def run_up(
     log_dir.mkdir(parents=True, exist_ok=True)
 
     started: list[tuple[Service, subprocess.Popen]] = []
-    state: dict = {"controller_pid": os.getpid(), "services": {}}
+    state: dict = {
+        "controller_pid": os.getpid(),
+        "services": {  # every service is listed from the start, in start order; pid is set once it has a process
+            svc.name: {"status": "pending", "pid": None, "port": svc.port, "health": svc.health, "stop": svc.stop,
+                       "command": svc.command, "log": str(log_path(log_dir, svc.name)), "error": None}
+            for svc in config.services
+        },
+    }
     previous_handler = None
     if threading.current_thread() is threading.main_thread():
         previous_handler = signal.signal(signal.SIGTERM, _on_sigterm)
     total = len(config.services)
     try:
+        write_state(log_dir, state)
         for number, svc in enumerate(config.services, 1):
             before = snapshot() if snapshot else None
             file = log_path(log_dir, svc.name)
             out(f"[{number}/{total}] starting {svc.name} on port {svc.port}  (log: {tidy(file)})")
             proc = start_service(svc, log_dir)
             started.append((svc, proc))
-            state["services"][svc.name] = {"pid": proc.pid, "port": svc.port, "health": svc.health, "stop": svc.stop, "command": svc.command, "log": str(file)}
-            write_state(log_dir, state)
+            mark(log_dir, state, svc.name, status="starting", pid=proc.pid)
             on_wait: Callable[[float, str], None] | None = None
             if progress is not None:
                 on_wait = functools.partial(_report, progress, svc.name)
             try:
                 wait_healthy(svc, proc, file, interval=health_interval, progress=on_wait)
+            except RunError as exc:
+                mark(log_dir, state, svc.name, status="failed", error=str(exc).splitlines()[0])
+                raise
             finally:
                 if progress:
                     progress(None, 0.0, "")
+            mark(log_dir, state, svc.name, status="running")
             line = f"      {svc.name} is up"
             if before is not None and snapshot:
                 after = snapshot()
@@ -331,6 +390,7 @@ def run_up(
             for svc, proc in started:
                 if proc.poll() is not None and svc.name not in reported:
                     reported.add(svc.name)
+                    mark(log_dir, state, svc.name, status="failed", error=f"exited with status {proc.returncode}")
                     out(f"warning: {svc.name} exited with status {proc.returncode}; see {log_path(log_dir, svc.name)}")
     except KeyboardInterrupt:
         out("")  # Ctrl+C leaves the cursor after "^C"
@@ -339,6 +399,13 @@ def run_up(
         # leave services running with a stale state file.
         restore = _hold_through_interrupts(out) if threading.current_thread() is threading.main_thread() else []
         try:
+            for entry in state["services"].values():
+                if entry["status"] in ("starting", "running"):
+                    entry["status"] = "stopping"
+            try:
+                write_state(log_dir, state)
+            except OSError:
+                pass  # a full disk must not stop the cleanup below
             if started:
                 stop_all([(svc.name, proc.pid, svc.stop, proc) for svc, proc in reversed(started)], grace, out)
             clear_state(log_dir)
@@ -360,9 +427,13 @@ def stop_from_state(
     state = read_state(log_dir)
     if not state:
         return False
-    services = list(state.get("services", {}).items())  # in start order
-    controller = state.get("controller_pid")
-    if controller and controller != os.getpid() and pid_alive(controller):
+    services = [(name, info) for name, info in state.get("services", {}).items() if info.get("pid")]  # in start order
+    controller = state.get("controller_pid") or 0
+    controller_alive = controller not in (0, os.getpid()) and pid_alive(controller)
+    if not services and not controller_alive:  # nothing was ever started, so there is nothing to stop
+        clear_state(log_dir)
+        return False
+    if controller_alive:
         out(f"Asking mesh up (pid {controller}) to stop {_count(len(services))}...")
         try:
             os.kill(controller, signal.SIGTERM)  # let `mesh up` shut down gracefully and clear the state

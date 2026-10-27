@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, completion, holders, runner, settings, ui
+from . import __version__, completion, holders, runner, settings, ui, watch
 from .config import ConfigError, load_config
 from .gpu import GpuError, parse_gpu_query, read_gpus
 from .planner import GpuBudget, Plan, PlanError, make_plan
@@ -211,22 +211,26 @@ def _cmd_down(args: argparse.Namespace) -> int:
     return 0
 
 
+def _status_text(rows: list[runner.ServiceRow]) -> str:
+    lines = [f"{r.name:<12} {r.state:<9} pid {r.pid if r.pid else '-':<8} port {r.port:<6} {r.health}" for r in rows]
+    lines += [f"  {r.name}: {r.error}  (see: mesh logs {r.name})" for r in rows if r.error]
+    return "\n".join(lines)
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
-    state = runner.read_state(_dir(args))
+    log_dir = _dir(args)
+    state = runner.read_state(log_dir)
     if not state:
         print("nothing running")
         return 0
-    rows = []
-    for name, info in state["services"].items():
-        alive = runner.group_alive(info["pid"])
-        code = runner.probe(info["port"], info["health"]) if alive else None
-        health = f"HTTP {code}" if code is not None else "not answering"
-        rows.append((name, alive, info["pid"], info["port"], health))
+    if ui.fancy() and sys.stdin.isatty():  # at a terminal the view keeps itself up to date; q quits
+        watch.watch(log_dir)
+        return 0
+    rows = runner.service_rows(state)
     if ui.fancy():
         ui.print_status(rows)
-        return 0
-    for name, alive, pid, port, health in rows:
-        print(f"{name:<12} {'running' if alive else 'stopped':<8} pid {pid:<8} port {port:<6} {health}")
+    else:
+        print(_status_text(rows))
     return 0
 
 

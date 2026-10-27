@@ -6,6 +6,12 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- `mesh status` is now a live view in a terminal: every service of the stack is listed from the start, with its
+  state (`pending`, `starting`, `running`, `failed`, `stopping`), its process id (`-` until it has one), its port
+  and its health, refreshed every second. Press `q` to quit. When piped it prints once, as before.
+- `state.json` now lists all services from the start and records each one's status.
+
 ### Fixed
 - `mesh status`, `mesh down`, `mesh logs` and `mesh gpu` only worked from the folder where `mesh up` was run,
   because logs and state defaulted to `logs/` in the current directory. `mesh up` now asks once which folder to

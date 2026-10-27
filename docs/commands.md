@@ -7,7 +7,7 @@ Back to the [README](../README.md) · [Config reference](config.md) · [How it w
 | `mesh plan CONFIG` | Simulates starting the services in order and reports which ones fit. Changes nothing. |
 | `mesh up CONFIG` | Runs the plan, then starts each service, waits for its health check, and prints the memory it added. Blocks until Ctrl+C. |
 | `mesh down` | Stops a stack started by `mesh up`, in reverse order. |
-| `mesh status` | Shows each service's state, process id, port and health. |
+| `mesh status` | A live view of every service: state, process id, port and health. Press `q` to quit. |
 | `mesh logs NAME` | Shows or follows a service's log. |
 | `mesh gpu` | Shows each GPU's memory and utilization, and who is holding the memory. |
 | `mesh completion SHELL` | Prints a Tab-completion script for `bash`, `zsh` or `fish`. |
@@ -109,8 +109,21 @@ is shown as unknown instead of failing.
 
 ## `mesh status` and `mesh down`
 
-`mesh status` prints one line per service: `running` or `stopped`, the process id, the port, and the HTTP
-status from its health path (or `not answering`).
+`mesh status` lists every service of the stack, in start order, and keeps itself up to date every second. Press
+`q` (or Ctrl+C) to leave it.
+
+| Column | Meaning |
+|---|---|
+| State | `pending` (not started yet), `starting` (loading, waiting for its health check), `running`, `failed` (it exited, or did not become healthy in time) or `stopping`. |
+| PID | `-` until the service has a process. |
+| Port | The port from your config. |
+| Health | The HTTP status from its health path, `not answering`, or `-` when there is no process to ask. |
+
+A failed service also gets a line under the table with the reason, and a pointer to `mesh logs NAME`. When the
+stack stops while you are watching, the last table stays on screen with the services shown as stopped.
+
+When the output or the input is not a terminal (a pipe, a script, CI), `mesh status` prints the table once and
+exits, so it never waits for a key.
 
 `mesh down`, run from another terminal, asks the `mesh up` process to shut down gracefully, so the result is the
 same as pressing Ctrl+C there. If that process is gone, it stops each recorded service itself.

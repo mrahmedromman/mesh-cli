@@ -261,3 +261,16 @@ def test_a_folder_that_cannot_be_used_is_an_error_not_a_crash(tmp_path, monkeypa
     cfg = write_cfg(tmp_path, "services:\n  - {name: svc, port: 8001, gpus: [0], measured_mib: {0: 1}, command: 'true'}\n")
     assert main(["up", cfg]) == 2
     assert "cannot create" in capsys.readouterr().err
+
+
+def test_status_lists_services_that_have_not_started_yet(tmp_path, capsys):
+    (tmp_path / "state.json").write_text(
+        '{"controller_pid": 1, "services": {'
+        '"llm": {"status": "pending", "pid": null, "port": 8001, "health": "/v1/models", "error": null},'
+        '"stt": {"status": "failed", "pid": null, "port": 8004, "health": "/v1/models", "error": "stt exited with status 3"}}}'
+    )
+    assert main(["status", "--log-dir", str(tmp_path)]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].split() == ["llm", "pending", "pid", "-", "port", "8001", "-"]
+    assert out[1].split()[:2] == ["stt", "failed"]
+    assert "stt: stt exited with status 3  (see: mesh logs stt)" in out[2]
