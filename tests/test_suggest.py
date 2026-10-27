@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from mesh_cli import completion, runner, suggest
+from mesh_cli import completion, runner, settings, suggest
 from mesh_cli.cli import build_parser, main
 from mesh_cli.config import ConfigError, load_config
 
@@ -143,6 +143,11 @@ def test_bash_script_is_valid_and_completes(tmp_path):
     assert complete("mesh", "logs", "--fo") == ["--follow"]
     assert set(complete("mesh", "logs", "--log-dir", "logs", "")) == {"llm", "stt"}
     assert complete("mesh", "logs", "--log-dir", "logs", "l") == ["llm"]
+    saved = tmp_path / "saved"
+    saved.mkdir()
+    (saved / "tts.log").write_text("x")
+    settings.save_folder(saved)  # without --log-dir the remembered folder is used, wherever you are
+    assert complete("mesh", "logs", "") == ["tts"]
 
 
 @pytest.mark.skipif(shutil.which("zsh") is None, reason="needs zsh")

@@ -28,13 +28,13 @@ or anything else that uses GPU memory.
 
 ```
 $ mesh up models.yaml
-[1/4] starting llm on port 8001  (log: logs/llm.log)
+[1/4] starting llm on port 8001  (log: ~/mesh-deck/llm.log)
       llm is up  (memory it added: GPU 0: ~16260 MiB, GPU 1: ~16260 MiB)
-[2/4] starting stt on port 8004  (log: logs/stt.log)
+[2/4] starting stt on port 8004  (log: ~/mesh-deck/stt.log)
       stt is up  (memory it added: GPU 0: ~6436 MiB)
-[3/4] starting tts on port 8005  (log: logs/tts.log)
+[3/4] starting tts on port 8005  (log: ~/mesh-deck/tts.log)
       tts is up  (memory it added: GPU 1: ~2353 MiB)
-[4/4] starting embed on port 8003  (log: logs/embed.log)
+[4/4] starting embed on port 8003  (log: ~/mesh-deck/embed.log)
       embed is up  (memory it added: GPU 1: ~3059 MiB)
 All services are up. Press Ctrl+C to stop everything.
 ```
@@ -129,7 +129,7 @@ pipx install git+https://github.com/mrahmedromman/mesh-deck.git
    mesh up models.yaml
    ```
 
-4. In other terminals, from the same directory:
+4. In other terminals, from any directory:
 
    ```bash
    mesh status              # what is running, and whether it answers
@@ -148,6 +148,23 @@ like this (illustrative numbers):
 
 The first time, run `mesh up` once and copy the printed "memory it added" numbers into `measured_mib`. The
 planner is most accurate with measured numbers. See [Config](https://github.com/mrahmedromman/mesh-deck/blob/main/docs/config.md#getting-real-numbers-for-measured_mib).
+
+### Where your files go
+
+The first time you run `mesh up` in a terminal, it asks which folder to use for logs and state:
+
+```
+Which folder should it use? [~/mesh-deck]
+```
+
+Press Enter for the suggested folder in your home directory, or type another one. `mesh` creates it and
+remembers your choice in `~/.config/mesh-deck.json`. Each service's log (`NAME.log`) and a small `state.json`
+(which services are running) are saved there, as plain files on your own computer. Nothing is uploaded. Because
+the folder is remembered, `mesh status`, `mesh down` and `mesh logs` work from any directory.
+
+To use another folder for one run, add `--log-dir FOLDER` to every command of that stack. To be asked again,
+delete the settings file. When output is not a terminal (a script or CI), `mesh` never asks: it uses the
+remembered folder, or `logs` in the current directory if there is none.
 
 ### Try it without a GPU
 

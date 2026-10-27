@@ -21,7 +21,7 @@ Back to the [README](../README.md) · [Config reference](config.md) · [How it w
 | `--external 0=417,1=4` | `plan` | Memory (MiB) already used by other programs on each GPU. Without it, `plan` counts everything currently in use as external and prints a note. |
 | `--force` | `up` | Start even if the plan says a service will not fit. |
 | `--plan` | `up` | Print the full plan. By default `up` prints one summary line when everything fits, and the full plan only when there is something to read (a service that does not fit, a warning, or a note). `mesh plan` always prints it in full. |
-| `--log-dir DIR` | `up`, `down`, `status`, `logs`, `gpu`, `plan` | Where logs and state live. Default `logs` in the current directory. Use the same value for every command. `gpu` and `plan` read it only to recognise your running services. |
+| `--log-dir DIR` | `up`, `down`, `status`, `logs`, `gpu`, `plan` | Where logs and state live. Default: the folder you chose the first time you ran `mesh up` (see [Where files go](#where-files-go)). Use the same value for every command of a stack. `gpu` and `plan` read it only to recognise your running services. |
 | `-n N` | `logs` | Show the last `N` lines. Default 50. `-n 0` shows none (useful with `-f` to see only new lines). |
 | `-n all` | `logs` | Show the whole log from the start, without needing to know how many lines it has. |
 | `-f`, `--follow` | `logs` | After printing, keep showing new lines until Ctrl+C. |
@@ -176,7 +176,7 @@ To turn on Tab completion, add one line to your shell's startup file, then open 
 | fish | `mesh completion fish > ~/.config/fish/completions/mesh.fish` |
 
 It completes commands, options, config files and shell names. `mesh logs <Tab>` lists the services of the stack in
-the current log directory (it honours `--log-dir` in bash and zsh; fish uses the default `logs`).
+the current log directory (it honours `--log-dir` in bash and zsh; fish uses the remembered folder).
 
 ## Terminal output
 
@@ -204,12 +204,17 @@ modes.
 
 ## Where files go
 
-Everything `mesh up` writes goes in the log directory (default `logs/` in the **current directory**):
+The first time you run `mesh up` in a terminal, it asks which folder to use and suggests `~/mesh-deck`. Press
+Enter to accept it or type another folder. The choice is saved in `~/.config/mesh-deck.json` (or under
+`$XDG_CONFIG_HOME`), so every command finds the same folder from any directory. Everything `mesh up` writes goes
+there, on your own computer:
 
-- `logs/NAME.log`: one file per service, with stdout and stderr together. Each `mesh up` starts the file
+- `NAME.log`: one file per service, with stdout and stderr together. Each `mesh up` starts the file
   fresh, so a new run overwrites the previous log. Copy a log you want to keep.
-- `logs/state.json`: which services are running, their process ids and ports. `mesh status`, `mesh down` and
-  `mesh logs` read it, which is why they must be run from the same directory (or with the same `--log-dir`).
-  It is removed when the stack stops.
+- `state.json`: which services are running, their process ids and ports. `mesh status`, `mesh down` and
+  `mesh logs` read it. It is removed when the stack stops.
 
-Add `logs/` to your `.gitignore`.
+`--log-dir FOLDER` uses a different folder for that command instead (give it to every command of the stack).
+Delete the settings file to be asked again. When output is not a terminal (a script or CI), `mesh` never asks:
+it uses the remembered folder, or `logs` in the current directory if nothing is saved. If your folder is inside a
+git repository, add it to `.gitignore`.

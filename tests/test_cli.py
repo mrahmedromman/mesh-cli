@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from mesh_cli import cli as cli_module
-from mesh_cli import holders
+from mesh_cli import holders, settings
 from mesh_cli.cli import main
 from mesh_cli.gpu import Gpu, GpuError, parse_gpu_query
 from mesh_cli.holders import GpuReport, Holder
@@ -212,3 +212,52 @@ def test_up_prints_the_full_plan_when_there_is_a_warning(tmp_path, monkeypatch, 
     # 0.9 of the card leaves less than the 1024 MiB margin free, so the plan has a warning worth reading
     out = run_up_with_fake_start(tmp_path, monkeypatch, capsys, services="  - {name: svc, port: 8001, gpus: [0], gpu_memory_utilization: 0.95, measured_mib: {0: 23200}, command: 'true'}\n")
     assert "warning: GPU 0 has only" in out and "Plan: all" not in out
+
+
+# --- the folder for logs and state is remembered, so commands work from any directory ----------------------------
+
+
+def save_stack(folder):
+    """A stack's files as `mesh up` leaves them: one log and a state file."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "llm.log").write_text("hello from llm\n")
+    (folder / "state.json").write_text(
+        '{"controller_pid": 1, "services": {"llm": {"pid": 1, "port": 8001, "health": "/v1/models"}}}'
+    )
+
+
+def test_status_and_logs_work_from_another_directory(tmp_path, monkeypatch, capsys):
+    save_stack(tmp_path / "deck")
+    settings.save_folder(tmp_path / "deck")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert main(["status"]) == 0
+    assert "llm" in capsys.readouterr().out
+    assert main(["logs", "llm"]) == 0
+    assert capsys.readouterr().out == "hello from llm\n"
+
+
+def test_up_asks_where_to_keep_files_the_first_time(tmp_path, monkeypatch, capsys):
+    chosen = tmp_path / "deck"
+    monkeypatch.setattr(settings, "interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": str(chosen))
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    seen = []
+    monkeypatch.setattr(cli_module.runner, "run_up", lambda config, log_dir, **k: seen.append(log_dir))
+    cfg = write_cfg(tmp_path, "services:\n  - {name: svc, port: 8001, gpus: [0], measured_mib: {0: 2500}, command: 'true'}\n")
+    assert main(["up", cfg]) == 0
+    assert seen == [chosen] and settings.saved_folder() == chosen
+    assert main(["up", cfg]) == 0  # the second time nobody is asked
+    assert seen == [chosen, chosen]
+
+
+def test_a_folder_that_cannot_be_used_is_an_error_not_a_crash(tmp_path, monkeypatch, capsys):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    monkeypatch.setattr(settings, "interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": str(blocker / "inside"))
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    cfg = write_cfg(tmp_path, "services:\n  - {name: svc, port: 8001, gpus: [0], measured_mib: {0: 1}, command: 'true'}\n")
+    assert main(["up", cfg]) == 2
+    assert "cannot create" in capsys.readouterr().err

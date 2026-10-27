@@ -32,7 +32,7 @@ Open an issue with:
 - Your `models.yaml` **with private paths and model names removed**.
 - The two `nvidia-smi` outputs above, from just before the failure if you can.
 
-For a service that fails to start, also include the last lines of its `logs/NAME.log`.
+For a service that fails to start, also include the last lines of its log (`NAME.log` in your mesh folder, `~/mesh-deck` by default).
 
 ## Development setup
 
