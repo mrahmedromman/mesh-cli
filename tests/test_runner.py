@@ -817,3 +817,39 @@ def test_a_log_folder_created_by_up_is_private_and_an_existing_one_is_left_alone
     os.chmod(shared, 0o755)
     runner.run_up(config, shared, hold=lambda: False, out=lambda _: None, health_interval=0.2, grace=5)
     assert mode(shared) == 0o755  # someone's own choice is not changed
+
+
+# --- the two "is it still there" checks behave the same way ------------------------------------------------------------
+
+
+@pytest.mark.parametrize("check, signal_function", [("pid_alive", "kill"), ("group_alive", "killpg")])
+def test_alive_checks_say_no_for_a_missing_process_and_yes_when_it_belongs_to_someone_else(monkeypatch, check, signal_function):
+    function = getattr(runner, check)
+
+    def missing(pid, sig):
+        raise ProcessLookupError
+
+    def not_ours(pid, sig):
+        raise PermissionError
+
+    monkeypatch.setattr(runner.os, signal_function, missing)
+    assert function(123) is False
+    monkeypatch.setattr(runner.os, signal_function, not_ours)
+    assert function(123) is True  # it exists, we just may not signal it
+    monkeypatch.setattr(runner.os, signal_function, lambda pid, sig: None)
+    assert function(123) is True
+
+
+def test_alive_checks_agree_with_a_real_process(sleeper):
+    assert runner.pid_alive(sleeper.pid) and runner.group_alive(sleeper.pid)
+    assert not runner.pid_alive(2_000_000_000) and not runner.group_alive(2_000_000_000)
+
+
+def test_progress_is_reported_with_the_service_name(tmp_path):
+    seen = []
+    config = Config(services=[http_service("a", free_port(), tmp_path)])
+    slow = config.services[0]
+    slow.command = f"sleep 1; {slow.command}"
+    runner.run_up(config, tmp_path / "logs", hold=lambda: False, out=lambda _: None, health_interval=0.2, grace=5,
+                  progress=lambda name, seconds, line: seen.append((name, isinstance(seconds, float), isinstance(line, str))))
+    assert ("a", True, True) in seen and seen[-1] == (None, True, True)

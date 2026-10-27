@@ -120,6 +120,11 @@ answer changes. If the wait runs out, the error says what the service last answe
 OpenAI-compatible servers and `/docs` for FastAPI apps. If a service only answers on a different route, set
 `health` to that route.
 
+`mesh` asks the service at `http://127.0.0.1:PORT/PATH`, on the same machine. A service that listens only on
+another address, such as a LAN address (`--host 10.0.0.5`) or IPv6 (`::1`), is never seen: `mesh up` then waits
+the whole `start_timeout_s` (900 seconds by default), stops everything and reports that the service did not become
+healthy. Make the service listen on `127.0.0.1` as well, for example with `--host 0.0.0.0`.
+
 Before anything starts, `mesh up` also checks that no other program is already listening on a service's port. A
 leftover process there would answer the health check and make a service that never started look healthy, so
 `mesh up` stops with a message naming the port and the service.

@@ -143,14 +143,23 @@ def port_in_use(port: int) -> bool:
         return False
 
 
-def group_alive(pid: int) -> bool:
+def _exists(signal_function: Callable[[int, int], None], pid: int) -> bool:
+    """Signal 0 only checks. A process that belongs to someone else still exists, so that counts as alive."""
     try:
-        os.killpg(pid, 0)
+        signal_function(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
     return True
+
+
+def group_alive(pid: int) -> bool:
+    return _exists(os.killpg, pid)
+
+
+def pid_alive(pid: int) -> bool:
+    return _exists(os.kill, pid)
 
 
 def read_state(log_dir: Path) -> dict | None:
@@ -305,16 +314,6 @@ def wait_healthy(
         sleep(interval)
 
 
-def pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 def stop_process(pid: int, stop_command: str | None = None, grace: float = 30.0, proc: subprocess.Popen | None = None) -> str:
     """Stop a service's process group.
 
@@ -400,10 +399,6 @@ def _on_sigterm(signum, frame):  # noqa: ARG001
     raise KeyboardInterrupt
 
 
-def _report(progress: Callable[[str | None, float, str], None], name: str, seconds: float, line: str) -> None:
-    progress(name, seconds, line)
-
-
 def _hold_through_interrupts(out: Callable[[str], None]) -> list:
     """Make Ctrl+C and SIGTERM harmless while services are being stopped. Returns what to put back afterwards."""
 
@@ -467,7 +462,7 @@ def run_up(
             mark(log_dir, state, svc.name, status="starting", pid=proc.pid, started=process_start(proc.pid))
             on_wait: Callable[[float, str], None] | None = None
             if progress is not None:
-                on_wait = functools.partial(_report, progress, svc.name)
+                on_wait = functools.partial(progress, svc.name)
             try:
                 wait_healthy(svc, proc, file, interval=health_interval, progress=on_wait)
             except RunError as exc:
