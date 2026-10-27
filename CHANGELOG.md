@@ -6,6 +6,8 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-27
+
 ### Changed
 - Pressing `q` in `mesh status` now leaves the last table on your terminal instead of clearing it, so the process
   ids can still be read and copied.
