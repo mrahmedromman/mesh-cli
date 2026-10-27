@@ -69,7 +69,8 @@ A measured-only service is planned correctly (checked with `mesh plan`), but no 
 3. Put those numbers in `measured_mib` and delete `overhead_mib`.
 
 The printed figure is the change in memory used while that service started, so it is slightly off if something
-else was using the GPU at the same moment.
+else was using the GPU at the same moment. If `nvidia-smi` cannot be read at that moment, the line says
+`memory it added: unavailable` and the start carries on; run `mesh up` again for a figure.
 
 ## Writing a command
 

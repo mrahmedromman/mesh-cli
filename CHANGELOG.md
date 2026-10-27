@@ -18,6 +18,9 @@ All notable changes to this project are recorded here. The format follows
   that `gpus` only informs the plan and the command must pin the GPU itself.
 
 ### Fixed
+- A failed `nvidia-smi` reading while `mesh up` was starting services (a timeout under load, for example) stopped
+  the whole start, even though the reading only feeds the "memory it added" figure. The start now carries on and
+  that line says `unavailable`.
 - The health check treated any HTTP answer as "up", including `503` while a model was still loading, so the next
   service could start before the previous one had finished loading. Answers of 500 or more now count as not ready,
   and a timeout says what the service last answered.

@@ -725,3 +725,45 @@ def test_up_prints_the_warning_under_the_is_up_line(tmp_path):
                   health_interval=0.2, grace=5)
     up = next(i for i, l in enumerate(lines) if "a is up" in l)
     assert lines[up + 1].startswith("warning: a added almost no memory on GPU 0")
+
+
+# --- a failed memory reading must not undo the start ------------------------------------------------------------------
+
+
+def test_a_memory_reading_that_fails_does_not_abort_the_start(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path), http_service("b", free_port(), tmp_path)])
+    lines = []
+    runner.run_up(config, tmp_path / "logs", snapshot=lambda: None, hold=lambda: False, out=lines.append,
+                  health_interval=0.2, grace=5)
+    assert [l for l in lines if " is up" in l] == [
+        "      a is up  (memory it added: unavailable)",
+        "      b is up  (memory it added: unavailable)",
+    ]
+    assert not any(l.startswith("warning") for l in lines) and lines[-1] == "All 2 services stopped."
+
+
+def test_the_next_service_is_measured_again_once_readings_work(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path), http_service("b", free_port(), tmp_path)])
+    readings = iter([None, None, {0: 100}, {0: 6000}])  # a: both readings fail; b: both work
+    lines = []
+    runner.run_up(config, tmp_path / "logs", snapshot=lambda: next(readings), hold=lambda: False, out=lines.append,
+                  health_interval=0.2, grace=5)
+    ups = [l for l in lines if " is up" in l]
+    assert ups == ["      a is up  (memory it added: unavailable)", "      b is up  (memory it added: GPU 0: ~5900 MiB)"]
+
+
+def test_only_the_reading_after_the_start_failing_is_also_unavailable(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path)])
+    readings = iter([{0: 100}, None])
+    lines = []
+    runner.run_up(config, tmp_path / "logs", snapshot=lambda: next(readings), hold=lambda: False, out=lines.append,
+                  health_interval=0.2, grace=5)
+    assert "      a is up  (memory it added: unavailable)" in lines
+
+
+def test_a_service_on_a_gpu_missing_from_the_readings_says_unavailable_not_an_empty_list(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path)])  # planned on GPU 0
+    lines = []
+    runner.run_up(config, tmp_path / "logs", snapshot=lambda: {5: 100}, hold=lambda: False, out=lines.append,
+                  health_interval=0.2, grace=5)
+    assert "      a is up  (memory it added: unavailable)" in lines

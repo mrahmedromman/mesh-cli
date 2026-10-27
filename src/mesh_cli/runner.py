@@ -416,7 +416,7 @@ def _say(message: str) -> None:
 def run_up(
     config: Config,
     log_dir: Path,
-    snapshot: Callable[[], dict[int, int]] | None = None,
+    snapshot: Callable[[], dict[int, int] | None] | None = None,
     hold: Callable[[], bool] | None = None,
     out: Callable[[str], None] = _say,
     health_interval: float = 2.0,
@@ -426,6 +426,8 @@ def run_up(
     """Start every service in order. Blocks (while `hold()` is true, default forever), then stops everything.
 
     `progress(name, seconds, last_log_line)` is called while a service loads; `progress(None, 0, "")` when it stops.
+    `snapshot()` returns the memory used on each GPU, or None when it cannot be read: that only means "memory it
+    added: unavailable" for that service, and never stops the start.
     """
     missing = [s.name for s in config.services if not s.command]
     if missing:
@@ -472,12 +474,14 @@ def run_up(
                     progress(None, 0.0, "")
             mark(log_dir, state, svc.name, status="running")
             line = f"      {svc.name} is up"
-            if before is not None and snapshot:
-                after = snapshot()
-                held = ", ".join(f"GPU {g}: ~{after[g] - before[g]} MiB" for g in svc.gpus if g in after and g in before)
-                line += f"  (memory it added: {held})"
+            after = snapshot() if snapshot else None
+            if snapshot:
+                held = ""
+                if before is not None and after is not None:
+                    held = ", ".join(f"GPU {g}: ~{after[g] - before[g]} MiB" for g in svc.gpus if g in after and g in before)
+                line += f"  (memory it added: {held or 'unavailable'})"
             out(line)
-            if before is not None and snapshot:
+            if before is not None and after is not None:
                 warning = wrong_gpu_warning(svc, before, after)
                 if warning:
                     out(f"warning: {warning}")
