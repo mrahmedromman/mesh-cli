@@ -73,6 +73,11 @@ def probe(port: int, path: str, timeout: float = 3.0) -> int | None:
         return None
 
 
+def is_up(code: int | None) -> bool:
+    """Whether a health probe's answer means the service is up. Any HTTP response does, because the server is listening."""
+    return code is not None
+
+
 def group_alive(pid: int) -> bool:
     try:
         os.killpg(pid, 0)
@@ -152,7 +157,10 @@ def service_rows(state: dict, probe_fn: Callable[..., int | None] = probe) -> li
         error = info.get("error") or ""
         if recorded in ("starting", "running") and not alive[name]:
             recorded, error = "failed", error or "the process is gone"
-        health = "-" if name not in codes else (f"HTTP {codes[name].result()}" if codes[name].result() is not None else "not answering")
+        code = codes[name].result() if name in codes else None
+        health = "-" if name not in codes else (f"HTTP {code}" if code is not None else "not answering")
+        if recorded == "starting" and is_up(code):  # `mesh up` records it at its next check; this is already true
+            recorded = "running"
         rows.append(ServiceRow(name, recorded, info.get("pid"), info["port"], health, error))
     return rows
 
@@ -190,7 +198,7 @@ def wait_healthy(
                 f"{svc.name} exited with status {code} before it became healthy. Last log lines:\n"
                 + tail_lines(log_file, 20)
             )
-        if probe_fn(svc.port, svc.health) is not None:
+        if is_up(probe_fn(svc.port, svc.health)):
             return
         if clock() > deadline:
             raise StartTimeout(

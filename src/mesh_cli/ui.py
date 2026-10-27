@@ -179,6 +179,7 @@ STATE_STYLE = {
     "running": ("●", "green"),
     "failed": ("✗", "bold red"),
     "stopping": ("◐", "yellow"),
+    "stopped": ("○", "dim"),
 }
 
 

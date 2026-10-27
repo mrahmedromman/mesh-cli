@@ -132,7 +132,7 @@ pipx install git+https://github.com/mrahmedromman/mesh-deck.git
 4. In other terminals, from any directory:
 
    ```bash
-   mesh status              # what is running, and whether it answers
+   mesh status              # live view of every service; press q to quit
    mesh logs chat -f        # follow one service's log
    mesh down                # stop everything (Ctrl+C in the `mesh up` terminal does the same)
    ```
@@ -206,7 +206,7 @@ spare. Nothing was started, and no GPU was needed.
 | `mesh plan CONFIG` | Simulates starting the services in order and reports which ones fit. |
 | `mesh up CONFIG` | Plans, starts each service in order, waits for its health check, and reports the memory it added. |
 | `mesh down` | Stops a stack started by `mesh up`. |
-| `mesh status` | Shows each service's state, process id, port and health. |
+| `mesh status` | A live view of every service: state, process id, port and health. Press `q` to quit. |
 | `mesh logs NAME [-n N\|all] [-f]` | Shows or follows a service's log. |
 | `mesh gpu` | Shows each GPU's memory and utilization, and who is holding the memory. |
 | `mesh completion SHELL` | Prints a Tab-completion script for `bash`, `zsh` or `fish`. |

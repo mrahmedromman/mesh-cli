@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, completion, holders, runner, settings, ui
+from . import __version__, completion, holders, runner, settings, ui, watch
 from .config import ConfigError, load_config
 from .gpu import GpuError, parse_gpu_query, read_gpus
 from .planner import GpuBudget, Plan, PlanError, make_plan
@@ -218,9 +218,13 @@ def _status_text(rows: list[runner.ServiceRow]) -> str:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    state = runner.read_state(_dir(args))
+    log_dir = _dir(args)
+    state = runner.read_state(log_dir)
     if not state:
         print("nothing running")
+        return 0
+    if ui.fancy() and sys.stdin.isatty():  # at a terminal the view keeps itself up to date; q quits
+        watch.watch(log_dir)
         return 0
     rows = runner.service_rows(state)
     if ui.fancy():

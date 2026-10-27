@@ -463,3 +463,9 @@ def test_services_are_probed_at_the_same_time(sleeper):
 
     state = {"services": {f"s{i}": {"status": "running", "pid": sleeper.pid, "port": i, "health": "/"} for i in range(4)}}
     assert [r.health for r in runner.service_rows(state, probe_fn=probe_together)] == ["HTTP 200"] * 4
+
+
+def test_a_starting_service_shows_as_running_as_soon_as_it_answers(sleeper):
+    state = {"services": {"a": {"status": "starting", "pid": sleeper.pid, "port": 1, "health": "/"}}}
+    assert runner.service_rows(state, probe_fn=fake_probe(200))[0].state == "running"
+    assert runner.service_rows(state, probe_fn=fake_probe(None))[0].state == "starting"
