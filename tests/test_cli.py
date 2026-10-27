@@ -288,3 +288,16 @@ def test_plan_says_when_a_service_would_not_fit_once_it_is_running(tmp_path, cap
     assert code == 1
     assert "will hold 9928 MiB but only 8918 MiB is free" in out
     assert "--gpu-memory-utilization 0.30" in out
+
+
+def test_up_reports_a_port_that_something_else_holds(tmp_path, monkeypatch, capsys):
+    import socket
+
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    with socket.socket() as squatter:
+        squatter.bind(("127.0.0.1", 0))
+        squatter.listen()
+        port = squatter.getsockname()[1]
+        cfg = write_cfg(tmp_path, f"services:\n  - {{name: svc, port: {port}, gpus: [0], measured_mib: {{0: 1}}, command: 'true'}}\n")
+        assert main(["up", cfg, "--log-dir", str(tmp_path / "logs")]) == 1
+    assert f"port {port} (svc) is already in use" in capsys.readouterr().err

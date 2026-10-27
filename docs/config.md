@@ -96,6 +96,13 @@ It should print `True 1`.
 
 ## Health paths
 
-A service counts as started when its `health` path returns any HTTP response (200, 404 and 405 all count),
-because that proves the server is listening. Use `/v1/models` for OpenAI-compatible servers and `/docs` for
-FastAPI apps. If a service only answers on a different route, set `health` to that route.
+A service counts as started when its `health` path returns an HTTP response below 500 (200, 401, 404 and 405
+all count), because that proves the server is listening. A 5xx answer, most often `503` while a model is still
+loading, means "reachable but not ready", so `mesh` keeps waiting and starts the next service only after the
+answer changes. If the wait runs out, the error says what the service last answered. Use `/v1/models` for
+OpenAI-compatible servers and `/docs` for FastAPI apps. If a service only answers on a different route, set
+`health` to that route.
+
+Before anything starts, `mesh up` also checks that no other program is already listening on a service's port. A
+leftover process there would answer the health check and make a service that never started look healthy, so
+`mesh up` stops with a message naming the port and the service.

@@ -13,6 +13,11 @@ All notable changes to this project are recorded here. The format follows
 - `state.json` now lists all services from the start and records each one's status.
 
 ### Fixed
+- The health check treated any HTTP answer as "up", including `503` while a model was still loading, so the next
+  service could start before the previous one had finished loading. Answers of 500 or more now count as not ready,
+  and a timeout says what the service last answered.
+- `mesh up` now refuses to start when another program is already listening on a service's port, instead of letting
+  that program's answers make a service that never started look healthy.
 - A leftover `state.json` (after a crash, `kill -9` or a reboot) could make `mesh down` stop an unrelated program
   that had been given the same process id, and could make `mesh up` refuse to start. `mesh` now records when each
   process began and only trusts a process id whose start time still matches. A service that is still running

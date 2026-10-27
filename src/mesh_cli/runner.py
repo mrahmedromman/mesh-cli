@@ -8,6 +8,7 @@ import json
 import os
 import re
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -121,8 +122,21 @@ def still_ours(info: dict) -> bool:
 
 
 def is_up(code: int | None) -> bool:
-    """Whether a health probe's answer means the service is up. Any HTTP response does, because the server is listening."""
-    return code is not None
+    """Whether a health probe's answer means the service is up.
+
+    Any answer below 500 does (200, but also 401, 404 or 405), because the server is listening. A 5xx means it is
+    reachable but not ready, for example 503 while a model is still loading, so mesh keeps waiting.
+    """
+    return code is not None and code < 500
+
+
+def port_in_use(port: int) -> bool:
+    """True if something is already listening on the port. Its answers would make a new service look healthy."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
 
 
 def group_alive(pid: int) -> bool:
@@ -187,6 +201,7 @@ class ServiceRow:
     port: int
     health: str  # "HTTP 200", "not answering", or "-" when there is no process to ask
     error: str = ""
+    up: bool = False  # the answer counts as healthy (see is_up)
 
 
 def service_rows(state: dict, probe_fn: Callable[..., int | None] = probe) -> list[ServiceRow]:
@@ -208,7 +223,7 @@ def service_rows(state: dict, probe_fn: Callable[..., int | None] = probe) -> li
         health = "-" if name not in codes else (f"HTTP {code}" if code is not None else "not answering")
         if recorded == "starting" and is_up(code):  # `mesh up` records it at its next check; this is already true
             recorded = "running"
-        rows.append(ServiceRow(name, recorded, info.get("pid"), info["port"], health, error))
+        rows.append(ServiceRow(name, recorded, info.get("pid"), info["port"], health, error, is_up(code)))
     return rows
 
 
@@ -238,6 +253,7 @@ def wait_healthy(
 ) -> None:
     began = clock()
     deadline = began + svc.start_timeout_s
+    last_answer: int | None = None
     while True:
         code = proc.poll()
         if code is not None:
@@ -245,11 +261,15 @@ def wait_healthy(
                 f"{svc.name} exited with status {code} before it became healthy. Last log lines:\n"
                 + tail_lines(log_file, 20)
             )
-        if is_up(probe_fn(svc.port, svc.health)):
+        answer = probe_fn(svc.port, svc.health)
+        if is_up(answer):
             return
+        if answer is not None:
+            last_answer = answer
         if clock() > deadline:
+            seen = f" (last answer: HTTP {last_answer})" if last_answer is not None else ""
             raise StartTimeout(
-                f"{svc.name} did not answer on port {svc.port}{svc.health} within {svc.start_timeout_s}s. "
+                f"{svc.name} did not become healthy on port {svc.port}{svc.health} within {svc.start_timeout_s}s{seen}. "
                 f"See {log_file}"
             )
         if progress is not None:
@@ -386,6 +406,9 @@ def run_up(
     missing = [s.name for s in config.services if not s.command]
     if missing:
         raise RunError(f"these services have no 'command' in the config: {', '.join(missing)}")
+    taken = [f"port {s.port} ({s.name}) is already in use by another program" for s in config.services if port_in_use(s.port)]
+    if taken:  # checked before anything starts: whatever answers there would pass for the new service
+        raise RunError("; ".join(taken) + ". Stop it, or change the port in the config.")
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
