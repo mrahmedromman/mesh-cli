@@ -8,6 +8,8 @@ Rules, taken from observed vLLM behaviour:
     (the check that produced "Free memory on device ... is less than desired GPU memory utilization").
   * After startup it holds `measured_mib` if known, else the requested amount plus `overhead_mib`.
     On a 4090 a request of 0.6 held 16252 MiB, about 1.5 GiB more than the fraction.
+  * A service fits only if the memory free before it starts covers both: what it needs to start, and what it
+    holds once running. Otherwise it would pass the start check and still leave the card below zero.
 Memory used by other processes (desktop, other jobs) is passed in as `external_mib`.
 """
 
@@ -68,6 +70,17 @@ class Plan:
         return all(s.ok for s in self.services)
 
 
+def _largest_fraction(free: int, usable: int, overhead: int, measured: int | None) -> float | None:
+    """The biggest gpu_memory_utilization (two decimals) that would fit in `free` MiB, or None if no fraction can.
+
+    With a measured footprint the fraction only has to pass the start check, as long as the measured memory fits.
+    Without one, the fraction's share plus `overhead` has to fit.
+    """
+    room = (free if measured <= free else 0) if measured is not None else free - overhead
+    fit = math.floor(max(room, 0) / usable * 100) / 100
+    return fit if fit > 0 else None
+
+
 def make_plan(config: Config, gpus: list[GpuBudget]) -> Plan:
     by_index = {g.index: g for g in gpus}
     free = {g.index: g.usable_mib - g.external_mib for g in gpus}
@@ -82,6 +95,7 @@ def make_plan(config: Config, gpus: list[GpuBudget]) -> Plan:
         checks: list[GpuCheck] = []
         notes: list[str] = []
         suggestion: float | None = None
+        fixable = True  # false when lowering the fraction cannot make this service fit on one of its GPUs
         for gi in svc.gpus:
             needed: int | None
             footprint: int | None
@@ -95,13 +109,22 @@ def make_plan(config: Config, gpus: list[GpuBudget]) -> Plan:
             else:
                 needed = footprint = None
                 notes.append(f"GPU {gi}: no gpu_memory_utilization or measured_mib, footprint unknown (counted as 0)")
-            ok = needed is None or free[gi] >= needed
+            ok = needed is None or free[gi] >= max(needed, footprint or 0)
             if not ok and svc.gpu_memory_utilization is not None:
-                fit = math.floor(max(free[gi], 0) / total * 100) / 100
-                suggestion = fit if suggestion is None else min(suggestion, fit)
+                fit = _largest_fraction(free[gi], total, svc.overhead_mib, measured)
+                if fit is None:
+                    fixable = False
+                    if measured is not None and measured > free[gi]:
+                        notes.append(f"GPU {gi}: {measured} MiB (measured_mib) does not fit in the {free[gi]} MiB that is free, "
+                                     "whatever gpu_memory_utilization is")
+                    else:
+                        notes.append(f"GPU {gi}: with overhead_mib {svc.overhead_mib} and {free[gi]} MiB free, "
+                                     "no gpu_memory_utilization fits")
+                else:
+                    suggestion = fit if suggestion is None else min(suggestion, fit)
             checks.append(GpuCheck(gi, free[gi], needed, footprint, ok))
 
-        plan = ServicePlan(svc.name, checks, suggestion, notes)
+        plan = ServicePlan(svc.name, checks, suggestion if fixable else None, notes)
         if plan.ok:
             for check in checks:
                 free[check.gpu] -= check.footprint_mib or 0

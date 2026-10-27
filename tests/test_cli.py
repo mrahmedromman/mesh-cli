@@ -274,3 +274,17 @@ def test_status_lists_services_that_have_not_started_yet(tmp_path, capsys):
     assert out[0].split() == ["llm", "pending", "pid", "-", "port", "8001", "-"]
     assert out[1].split()[:2] == ["stt", "failed"]
     assert "stt: stt exited with status 3  (see: mesh logs stt)" in out[2]
+
+
+def test_plan_says_when_a_service_would_not_fit_once_it_is_running(tmp_path, capsys):
+    cfg = tmp_path / "models.yaml"
+    cfg.write_text(
+        "services:\n"
+        "  - {name: chat, port: 8001, gpus: [0], gpu_memory_utilization: 0.55, overhead_mib: 1500}\n"
+        "  - {name: embeddings, port: 8003, gpus: [0], gpu_memory_utilization: 0.35, overhead_mib: 1500}\n"
+    )
+    code = main(["plan", str(cfg), "--gpus-csv", FIXTURE, "--external", EXTERNAL])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "will hold 9928 MiB but only 8918 MiB is free" in out
+    assert "--gpu-memory-utilization 0.30" in out
