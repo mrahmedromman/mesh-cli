@@ -32,7 +32,6 @@ silently ignored. Service names and ports must be unique.
 | `gpus` | yes | List of GPU indexes the service uses, as `nvidia-smi` numbers them. This is what the plan assumes; your `command` must really use these GPUs (see [Choosing GPUs](#choosing-gpus-for-a-plain-command)). |
 | `command` | for `up` | Shell snippet run with `bash -c`. See [Writing a command](#writing-a-command). Not needed for `plan`. |
 | `stop` | no | Command run first when stopping, e.g. `docker stop NAME`. Recommended for Docker services. |
-| `runtime` | no | `command` (default) or `docker`. A label for now; both are started through `command`. |
 | `gpu_memory_utilization` | no | vLLM-style fraction (above 0, up to 1) of each GPU. Used to check the service can start. |
 | `measured_mib` | no | Memory the service really held on each GPU, e.g. `{0: 16252, 1: 16252}`. The best source of truth. |
 | `overhead_mib` | no | Extra memory beyond the fraction, used only for a GPU with no `measured_mib`. Default 0. |

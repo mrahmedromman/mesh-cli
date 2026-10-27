@@ -20,7 +20,6 @@ services:
         --max-model-len 16384
 
   - name: stt
-    runtime: docker
     port: 8004
     gpus: [0]
     gpu_memory_utilization: 0.25
@@ -38,7 +37,6 @@ services:
         --gpu-memory-utilization 0.25
 
   - name: tts
-    runtime: docker
     port: 8005
     gpus: [1]
     health: /docs
@@ -56,7 +54,6 @@ services:
         my-tts-image:latest
 
   - name: embed
-    runtime: docker
     port: 8003
     gpus: [1]
     gpu_memory_utilization: 0.20
