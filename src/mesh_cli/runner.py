@@ -26,6 +26,10 @@ from .settings import tidy
 STATE_FILE = "state.json"
 
 
+MIN_ADDED_MIB = 100  # a model on a GPU takes more than the CUDA context alone, which is already a few hundred MiB
+OTHER_GROWTH_MIB = 500  # growth on a GPU the service did not list that is worth pointing out
+
+
 class RunError(Exception):
     pass
 
@@ -225,6 +229,26 @@ def service_rows(state: dict, probe_fn: Callable[..., int | None] = probe) -> li
             recorded = "running"
         rows.append(ServiceRow(name, recorded, info.get("pid"), info["port"], health, error, is_up(code)))
     return rows
+
+
+def wrong_gpu_warning(svc: Service, before: dict[int, int], after: dict[int, int]) -> str | None:
+    """A warning when a GPU the service lists gained almost no memory while it started, else None.
+
+    `mesh` only plans with the GPUs the config lists; it is the command that decides which GPU the service uses. If
+    the command does not match the list, the plan was wrong, and the memory readings show it.
+    """
+    added = {g: after[g] - before[g] for g in svc.gpus if g in before and g in after}
+    low = [(g, d) for g, d in added.items() if d < MIN_ADDED_MIB]
+    if not low:
+        return None
+    where = ", ".join(f"GPU {g} ({d:+d} MiB)" for g, d in low)
+    grew = [f"GPU {g} grew by ~{after[g] - before[g]} MiB" for g in sorted(after)
+            if g not in svc.gpus and g in before and after[g] - before[g] >= OTHER_GROWTH_MIB]
+    text = f"{svc.name} added almost no memory on {where}" + (f"; {', '.join(grew)} meanwhile" if grew else "")
+    ids = ",".join(str(g) for g in svc.gpus)
+    pin = f"--gpus '\"device={ids}\"'" if "docker" in (svc.command or "") else f"CUDA_VISIBLE_DEVICES={ids}"
+    plan = f"GPU {ids.replace(',', ', ')}" if len(svc.gpus) == 1 else f"GPUs {ids.replace(',', ', ')}"
+    return f"{text}. The plan assumes {svc.name} uses {plan}: make its command use {'it' if len(svc.gpus) == 1 else 'them'} too, for example {pin}."
 
 
 def start_service(svc: Service, log_dir: Path) -> subprocess.Popen:
@@ -453,6 +477,10 @@ def run_up(
                 held = ", ".join(f"GPU {g}: ~{after[g] - before[g]} MiB" for g in svc.gpus if g in after and g in before)
                 line += f"  (memory it added: {held})"
             out(line)
+            if before is not None and snapshot:
+                warning = wrong_gpu_warning(svc, before, after)
+                if warning:
+                    out(f"warning: {warning}")
         out("All services are up. Press Ctrl+C to stop everything.")
         reported: set[str] = set()
         while hold is None or hold():

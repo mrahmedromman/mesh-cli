@@ -29,7 +29,7 @@ silently ignored. Service names and ports must be unique.
 |---|---|---|
 | `name` | yes | Used in output, log file names (`NAME.log`) and `mesh logs NAME`. |
 | `port` | yes | Port polled for the health check. Must be unique across services. |
-| `gpus` | yes | List of GPU indexes the service uses, as `nvidia-smi` numbers them. |
+| `gpus` | yes | List of GPU indexes the service uses, as `nvidia-smi` numbers them. This is what the plan assumes; your `command` must really use these GPUs (see [Choosing GPUs](#choosing-gpus-for-a-plain-command)). |
 | `command` | for `up` | Shell snippet run with `bash -c`. See [Writing a command](#writing-a-command). Not needed for `plan`. |
 | `stop` | no | Command run first when stopping, e.g. `docker stop NAME`. Recommended for Docker services. |
 | `runtime` | no | `command` (default) or `docker`. A label for now; both are started through `command`. |
@@ -81,6 +81,23 @@ else was using the GPU at the same moment.
   For conda you may need `source ~/miniconda3/etc/profile.d/conda.sh` before `conda activate`.
 - **Docker services:** use `exec docker run --rm --name NAME ...` and add `stop: docker stop NAME`.
 - **Multi-line commands** work with a YAML block (`command: |`); lines ending in `\` continue as in a shell.
+
+### Choosing GPUs for a plain command
+
+`gpus` only tells the plan which GPUs a service uses. `mesh` does not choose the GPU for your command, so the
+command has to match, for example `CUDA_VISIBLE_DEVICES=1 exec vllm serve ...` for `gpus: [1]`. Without it most
+programs use GPU 0, and the plan is wrong. On a machine with different GPU models, also set
+`CUDA_DEVICE_ORDER=PCI_BUS_ID`, because otherwise CUDA can number the GPUs differently from `nvidia-smi`.
+
+After each service is up, `mesh up` compares the memory before and after. If a GPU you listed gained almost nothing
+(under 100 MiB) it prints a warning, and names any other GPU that grew meanwhile:
+
+```
+warning: llm added almost no memory on GPU 1 (+3 MiB); GPU 0 grew by ~16260 MiB meanwhile. The plan assumes llm uses GPU 1: make its command use it too, for example CUDA_VISIBLE_DEVICES=1.
+```
+
+The warning is a hint, not an error: the stack keeps starting. Another program that starts at the same moment can
+also move the numbers.
 
 ### Choosing GPUs for a container
 
