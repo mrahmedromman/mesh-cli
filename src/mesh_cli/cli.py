@@ -33,6 +33,14 @@ def _dir(args: argparse.Namespace, ask: bool = False) -> Path:
     return settings.log_dir(args.log_dir, ask)
 
 
+def _used_memory() -> dict[int, int] | None:
+    """Memory used on each GPU, or None if nvidia-smi cannot be read right now. Used only to report what a service added."""
+    try:
+        return {g.index: g.used_mib for g in read_gpus()}
+    except GpuError:
+        return None
+
+
 def _parse_external(value: str) -> dict[int, int]:
     result: dict[int, int] = {}
     for part in value.split(","):
@@ -187,7 +195,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
             _show_holders(log_dir, "Who is holding memory on the GPUs that are short:", short)
             return 1
         print()
-        snapshot = lambda: {g.index: g.used_mib for g in read_gpus()}  # noqa: E731
+        snapshot = _used_memory
     display = ui.StartupDisplay() if ui.fancy() else None
     try:
         if display:

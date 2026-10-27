@@ -663,3 +663,107 @@ def test_up_refuses_to_start_when_a_port_is_already_taken_and_starts_nothing(tmp
         with pytest.raises(runner.RunError, match=r"port \d+ \(b\) is already in use"):
             runner.run_up(config, tmp_path / "logs", out=lambda _: None, health_interval=0.2, grace=5)
     assert not (tmp_path / "logs" / "a.log").exists() and runner.read_state(tmp_path / "logs") is None
+
+
+# --- a service that does not use the GPU it was planned on ------------------------------------------------------------
+
+
+def planned_on(*gpus, command="exec vllm serve m"):
+    return Service(name="llm", port=8001, gpus=list(gpus), command=command)
+
+
+def test_no_warning_when_the_service_added_memory_on_its_gpus():
+    before, after = {0: 100, 1: 100}, {0: 100, 1: 6500}
+    assert runner.wrong_gpu_warning(planned_on(1), before, after) is None
+
+
+def test_a_listed_gpu_that_gained_nothing_is_reported_with_the_gpu_that_grew_instead():
+    before, after = {0: 100, 1: 100}, {0: 16360, 1: 103}
+    warning = runner.wrong_gpu_warning(planned_on(1), before, after)
+    assert warning == (
+        "llm added almost no memory on GPU 1 (+3 MiB); GPU 0 grew by ~16260 MiB meanwhile. "
+        "The plan assumes llm uses GPU 1: make its command use it too, for example CUDA_VISIBLE_DEVICES=1."
+    )
+
+
+def test_a_listed_gpu_that_gained_nothing_is_reported_even_if_no_other_gpu_grew():
+    warning = runner.wrong_gpu_warning(planned_on(1), {0: 100, 1: 100}, {0: 100, 1: 100})
+    assert warning and "added almost no memory on GPU 1 (+0 MiB)" in warning and "grew" not in warning
+
+
+def test_only_the_listed_gpus_that_gained_nothing_are_named():
+    before, after = {0: 100, 1: 100, 2: 100}, {0: 8000, 1: 105, 2: 100}
+    warning = runner.wrong_gpu_warning(planned_on(0, 1), before, after)
+    assert warning and "on GPU 1 (+5 MiB)" in warning and "GPU 0 (" not in warning
+    assert "CUDA_VISIBLE_DEVICES=0,1" in warning
+
+
+def test_a_small_service_that_really_used_the_gpu_is_not_flagged():
+    assert runner.wrong_gpu_warning(planned_on(0), {0: 100}, {0: 100 + runner.MIN_ADDED_MIB}) is None
+
+
+def test_memory_that_went_down_counts_as_nothing_added():
+    warning = runner.wrong_gpu_warning(planned_on(0), {0: 5000}, {0: 4950})
+    assert warning and "GPU 0 (-50 MiB)" in warning
+
+
+def test_a_docker_service_is_told_to_use_the_gpus_option_not_cuda_visible_devices():
+    warning = runner.wrong_gpu_warning(planned_on(1, command="exec docker run --rm --name llm img"), {1: 0}, {1: 0})
+    assert warning and "--gpus" in warning and "device=1" in warning and "CUDA_VISIBLE_DEVICES" not in warning
+
+
+def test_gpus_missing_from_the_readings_are_ignored():
+    assert runner.wrong_gpu_warning(planned_on(3), {0: 1}, {0: 9000}) is None
+
+
+def test_up_prints_the_warning_under_the_is_up_line(tmp_path):
+    port = free_port()
+    config = Config(services=[http_service("a", port, tmp_path)])  # planned on GPU 0
+    readings = iter([{0: 100, 1: 100}, {0: 100, 1: 16000}])
+    lines = []
+    runner.run_up(config, tmp_path / "logs", snapshot=lambda: next(readings), hold=lambda: False, out=lines.append,
+                  health_interval=0.2, grace=5)
+    up = next(i for i, l in enumerate(lines) if "a is up" in l)
+    assert lines[up + 1].startswith("warning: a added almost no memory on GPU 0")
+
+
+# --- a failed memory reading must not undo the start ------------------------------------------------------------------
+
+
+def test_a_memory_reading_that_fails_does_not_abort_the_start(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path), http_service("b", free_port(), tmp_path)])
+    lines = []
+    runner.run_up(config, tmp_path / "logs", snapshot=lambda: None, hold=lambda: False, out=lines.append,
+                  health_interval=0.2, grace=5)
+    assert [l for l in lines if " is up" in l] == [
+        "      a is up  (memory it added: unavailable)",
+        "      b is up  (memory it added: unavailable)",
+    ]
+    assert not any(l.startswith("warning") for l in lines) and lines[-1] == "All 2 services stopped."
+
+
+def test_the_next_service_is_measured_again_once_readings_work(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path), http_service("b", free_port(), tmp_path)])
+    readings = iter([None, None, {0: 100}, {0: 6000}])  # a: both readings fail; b: both work
+    lines = []
+    runner.run_up(config, tmp_path / "logs", snapshot=lambda: next(readings), hold=lambda: False, out=lines.append,
+                  health_interval=0.2, grace=5)
+    ups = [l for l in lines if " is up" in l]
+    assert ups == ["      a is up  (memory it added: unavailable)", "      b is up  (memory it added: GPU 0: ~5900 MiB)"]
+
+
+def test_only_the_reading_after_the_start_failing_is_also_unavailable(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path)])
+    readings = iter([{0: 100}, None])
+    lines = []
+    runner.run_up(config, tmp_path / "logs", snapshot=lambda: next(readings), hold=lambda: False, out=lines.append,
+                  health_interval=0.2, grace=5)
+    assert "      a is up  (memory it added: unavailable)" in lines
+
+
+def test_a_service_on_a_gpu_missing_from_the_readings_says_unavailable_not_an_empty_list(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path)])  # planned on GPU 0
+    lines = []
+    runner.run_up(config, tmp_path / "logs", snapshot=lambda: {5: 100}, hold=lambda: False, out=lines.append,
+                  health_interval=0.2, grace=5)
+    assert "      a is up  (memory it added: unavailable)" in lines

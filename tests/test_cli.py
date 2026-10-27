@@ -301,3 +301,14 @@ def test_up_reports_a_port_that_something_else_holds(tmp_path, monkeypatch, caps
         cfg = write_cfg(tmp_path, f"services:\n  - {{name: svc, port: {port}, gpus: [0], measured_mib: {{0: 1}}, command: 'true'}}\n")
         assert main(["up", cfg, "--log-dir", str(tmp_path / "logs")]) == 1
     assert f"port {port} (svc) is already in use" in capsys.readouterr().err
+
+
+def test_the_memory_reading_used_by_up_gives_none_instead_of_raising(monkeypatch):
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    assert cli_module._used_memory() == {0: 100}
+
+    def broken():
+        raise GpuError("nvidia-smi failed: timed out")
+
+    monkeypatch.setattr(cli_module, "read_gpus", broken)
+    assert cli_module._used_memory() is None
