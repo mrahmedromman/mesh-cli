@@ -102,3 +102,72 @@ def test_unknown_gpu_is_an_error():
     svc = Service(name="x", port=1, gpus=[3], gpu_memory_utilization=0.1)
     with pytest.raises(PlanError, match="GPU \\[3\\]"):
         make_plan(config(svc), RIG)
+
+
+# --- a service must fit once it is running, not only when it starts -----------------------------------------------
+
+# usable = 24564 - 485 = 24079; the desktop uses 417, so 23662 is free before the first service.
+CARD = [GpuBudget(0, 24564, 417, "RTX 4090", 485)]
+CHAT = Service(name="chat", port=8001, gpus=[0], gpu_memory_utilization=0.55, overhead_mib=1500)  # holds 13244 + 1500
+
+
+def embeddings(fraction=0.35, **extra):
+    return Service(name="embeddings", port=8003, gpus=[0], gpu_memory_utilization=fraction, **extra)
+
+
+def test_a_service_whose_footprint_does_not_fit_is_a_failure_even_if_it_can_start():
+    # 8918 MiB are free after chat. 0.35 needs 8428 to start, so the start check passes, but with its overhead it
+    # holds 9928 and would leave the card at -1010 MiB.
+    plan = make_plan(config(CHAT, embeddings(overhead_mib=1500)), CARD)
+    check = plan.services[1].checks[0]
+    assert (check.free_before_mib, check.needed_mib, check.footprint_mib) == (8918, 8428, 9928)
+    assert not plan.ok and not check.ok
+
+
+def test_the_suggestion_leaves_room_for_the_overhead():
+    plan = make_plan(config(CHAT, embeddings(overhead_mib=1500)), CARD)
+    # (8918 - 1500) / 24079 = 0.308: 0.30 holds 7224 + 1500 = 8724, but 0.31 would hold 8965
+    assert plan.services[1].suggested_utilization == 0.30
+
+
+@pytest.mark.parametrize("overhead", [0, 500, 1500, 3000])
+def test_following_the_suggestion_makes_the_plan_fit_with_memory_to_spare(overhead):
+    first = make_plan(config(CHAT, embeddings(0.6, overhead_mib=overhead)), CARD)
+    suggestion = first.services[1].suggested_utilization
+    assert not first.ok and suggestion is not None
+    second = make_plan(config(CHAT, embeddings(suggestion, overhead_mib=overhead)), CARD)
+    assert second.ok and min(second.free_after_mib.values()) >= 0
+
+
+def test_a_measured_footprint_larger_than_the_free_memory_fails_and_a_lower_fraction_is_not_suggested():
+    svc = embeddings(0.30, measured_mib={0: 9000})  # starts fine (7224), but holds 9000 of 8918
+    plan = make_plan(config(CHAT, svc), CARD)
+    assert not plan.ok
+    assert plan.services[1].suggested_utilization is None
+    assert any("measured_mib" in note for note in plan.services[1].notes)
+
+
+def test_a_measured_footprint_that_fits_but_a_fraction_that_does_not_still_gets_a_suggestion():
+    svc = embeddings(0.40, measured_mib={0: 6000})  # needs 9632 to start, free is 8918, holds only 6000
+    plan = make_plan(config(CHAT, svc), CARD)
+    assert not plan.ok
+    assert plan.services[1].suggested_utilization == 0.37  # 8918 / 24079
+
+
+def test_overhead_alone_larger_than_the_free_memory_gets_no_suggestion():
+    plan = make_plan(config(CHAT, embeddings(0.10, overhead_mib=9000)), CARD)
+    assert not plan.ok
+    assert plan.services[1].suggested_utilization is None
+    assert any("overhead_mib" in note for note in plan.services[1].notes)
+
+
+def test_a_suggestion_is_withheld_if_one_of_the_gpus_cannot_be_fixed_by_lowering_the_fraction():
+    rig = [GpuBudget(0, 24564, 0, "RTX 4090", 485), GpuBudget(1, 24564, 0, "RTX 4090", 485)]
+    svc = Service(name="both", port=1, gpus=[0, 1], gpu_memory_utilization=0.9, measured_mib={1: 30000})
+    plan = make_plan(config(svc), rig)
+    assert not plan.ok and plan.services[0].suggested_utilization is None
+
+
+def test_a_service_that_fits_is_unchanged_by_the_stricter_check():
+    plan = make_plan(config(CHAT, embeddings(0.25, overhead_mib=500)), CARD)  # holds 6020 + 500 of 8918
+    assert plan.ok and plan.free_after_mib[0] == 8918 - 6520 and plan.warnings == []

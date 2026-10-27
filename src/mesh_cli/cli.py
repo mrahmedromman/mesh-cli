@@ -65,8 +65,10 @@ def _render(plan: Plan, budgets: list[GpuBudget]) -> str:
                 lines.append(f"     GPU {c.gpu}: footprint unknown, {c.free_before_mib} MiB free before start")
             elif c.ok:
                 lines.append(f"     GPU {c.gpu}: needs {c.needed_mib} MiB free, has {c.free_before_mib}; will hold {c.footprint_mib} MiB")
-            else:
+            elif c.needed_mib > c.free_before_mib:
                 lines.append(f"     GPU {c.gpu}: needs {c.needed_mib} MiB free but only {c.free_before_mib} MiB is free")
+            else:  # it can start, but would hold more than is free
+                lines.append(f"     GPU {c.gpu}: will hold {c.footprint_mib} MiB but only {c.free_before_mib} MiB is free")
         if svc.suggested_utilization is not None:
             lines.append(f"     try --gpu-memory-utilization {svc.suggested_utilization:.2f} or less")
         for note in svc.notes:

@@ -13,6 +13,10 @@ All notable changes to this project are recorded here. The format follows
 - `state.json` now lists all services from the start and records each one's status.
 
 ### Fixed
+- `mesh plan` and `mesh up` said a service fitted when it could start but would hold more memory than was free
+  (its `overhead_mib` or `measured_mib` pushed the GPU below zero). The plan now reports it as not fitting, and
+  the suggested `--gpu-memory-utilization` allows for the overhead. When no smaller fraction can help (a
+  `measured_mib` that is too big, or an overhead that leaves no room) it says so instead of suggesting one.
 - `mesh status`, `mesh down`, `mesh logs` and `mesh gpu` only worked from the folder where `mesh up` was run,
   because logs and state defaulted to `logs/` in the current directory. `mesh up` now asks once which folder to
   use (suggesting `~/mesh-deck`), remembers it in `~/.config/mesh-deck.json`, and every command uses it from any

@@ -24,11 +24,16 @@ you launch.
    it starts.
 3. **After it starts,** it holds `measured_mib` if you gave one, otherwise the requested amount plus
    `overhead_mib`.
-4. **In order.** Services are checked in the order listed. Each one that starts reduces the free memory for the
+4. **It must fit both ways.** A service fits only if the free memory covers what it needs to start *and* what it
+   holds once running. A service can pass the start check and still hold more than is free, because of
+   `overhead_mib` or a large `measured_mib`; the plan then reports it as not fitting. It suggests the largest
+   `--gpu-memory-utilization` that would fit, allowing for `overhead_mib`. If the measured memory alone is too
+   big, or the overhead leaves no room, no smaller fraction helps, and the plan says so instead of suggesting one.
+5. **In order.** Services are checked in the order listed. Each one that starts reduces the free memory for the
    next. A service that does not fit is reported and not counted.
-5. **Other programs.** Memory used by other programs (your desktop, other jobs) is read from `nvidia-smi` and
+6. **Other programs.** Memory used by other programs (your desktop, other jobs) is read from `nvidia-smi` and
    subtracted first, or taken from `--external`.
-6. **Margin.** `plan` warns if a GPU ends with less free memory than `margin_mib`.
+7. **Margin.** `plan` warns if a GPU ends with less free memory than `margin_mib`.
 
 When a service fails the check, `mesh` suggests the largest fraction (rounded down to two decimals) that would
 fit at that point in the order.
