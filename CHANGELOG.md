@@ -7,6 +7,8 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Changed
+- The docs now say that the health check connects to `127.0.0.1`, so a service that listens only on a LAN address
+  or on IPv6 is never seen and `mesh up` waits out `start_timeout_s`.
 - `mesh status` is now a live view in a terminal: every service of the stack is listed from the start, with its
   state (`pending`, `starting`, `running`, `failed`, `stopping`), its process id (`-` until it has one), its port
   and its health, refreshed every second. Press `q` to quit. When piped it prints once, as before.
