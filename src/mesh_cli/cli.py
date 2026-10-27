@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, completion, holders, runner, ui
+from . import __version__, completion, holders, runner, settings, ui
 from .config import ConfigError, load_config
 from .gpu import GpuError, parse_gpu_query, read_gpus
 from .planner import GpuBudget, Plan, PlanError, make_plan
@@ -27,6 +27,10 @@ class _Parser(argparse.ArgumentParser):
             what = "command" if message.startswith("argument command") else "value"
             message = f"unknown {what} '{word}'.{did_you_mean(word, options)} Choose from: {', '.join(options)}"
         super().error(message)
+
+
+def _dir(args: argparse.Namespace, ask: bool = False) -> Path:
+    return settings.log_dir(args.log_dir, ask)
 
 
 def _parse_external(value: str) -> dict[int, int]:
@@ -113,7 +117,7 @@ def _show_holders(log_dir: Path, title: str, only: set[int] | None = None) -> No
 
 
 def _cmd_gpu(args: argparse.Namespace) -> int:
-    reports = holders.gather(Path(args.log_dir))
+    reports = holders.gather(_dir(args))
     if ui.fancy():
         ui.print_holders(reports)
     else:
@@ -151,13 +155,13 @@ def _cmd_plan(args: argparse.Namespace) -> int:
     plan = make_plan(config, budgets)
     _show_plan(plan, budgets)
     if args.external is None and not args.gpus_csv and any(b.external_mib > 0 for b in budgets):
-        _show_holders(Path(args.log_dir), "Memory currently in use, by holder:", {b.index for b in budgets if b.external_mib > 0})
+        _show_holders(_dir(args), "Memory currently in use, by holder:", {b.index for b in budgets if b.external_mib > 0})
     return 0 if plan.ok else 1
 
 
 def _cmd_up(args: argparse.Namespace) -> int:
     config = load_config(args.config)
-    log_dir = Path(args.log_dir)
+    log_dir = _dir(args, ask=True)
     alive = runner.running_services(log_dir)
     if alive:
         print(f"error: already running ({', '.join(alive)}). Stop them first with: mesh down", file=sys.stderr)
@@ -201,13 +205,14 @@ def _cmd_up(args: argparse.Namespace) -> int:
 
 def _cmd_down(args: argparse.Namespace) -> int:
     out = ui.StartupDisplay().out if ui.fancy() else print
-    if not runner.stop_from_state(Path(args.log_dir), out=out):
-        print(f"nothing running (looked for {Path(args.log_dir) / runner.STATE_FILE})")
+    log_dir = _dir(args)
+    if not runner.stop_from_state(log_dir, out=out):
+        print(f"nothing running (looked for {log_dir / runner.STATE_FILE})")
     return 0
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    state = runner.read_state(Path(args.log_dir))
+    state = runner.read_state(_dir(args))
     if not state:
         print("nothing running")
         return 0
@@ -226,9 +231,10 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 
 def _cmd_logs(args: argparse.Namespace) -> int:
-    path = runner.log_path(Path(args.log_dir), args.service)
+    log_dir = _dir(args)
+    path = runner.log_path(log_dir, args.service)
     if not path.exists():
-        known = runner.known_services(Path(args.log_dir))
+        known = runner.known_services(log_dir)
         if known:
             print(f"error: no log for service '{args.service}'.{did_you_mean(args.service, known)} "
                   f"Known services: {', '.join(known)}", file=sys.stderr)
@@ -264,7 +270,7 @@ def _cmd_completion(args: argparse.Namespace) -> int:
 
 
 def _cmd_complete(args: argparse.Namespace) -> int:
-    for name in runner.known_services(Path(args.log_dir)):
+    for name in runner.known_services(_dir(args)):
         print(name)
     return 0
 
@@ -278,16 +284,16 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("config", help="path to models.yaml")
     plan.add_argument("--gpus-csv", help="saved output of: nvidia-smi --query-gpu=index,uuid,name,memory.total,memory.used,memory.free --format=csv")
     plan.add_argument("--external", type=_parse_external, help="memory used by other processes, e.g. 0=417,1=4 (MiB)")
-    plan.add_argument("--log-dir", default="logs", help="where `mesh up` keeps its state (used to recognise your services)")
+    plan.add_argument("--log-dir", help="folder where `mesh up` keeps its state (used to recognise your services); default: the remembered folder")
     plan.set_defaults(func=_cmd_plan)
 
     gpu = sub.add_parser("gpu", help="show who is holding memory on each GPU")
-    gpu.add_argument("--log-dir", default="logs", help="where `mesh up` keeps its state (used to recognise your services)")
+    gpu.add_argument("--log-dir", help="folder where `mesh up` keeps its state (used to recognise your services); default: the remembered folder")
     gpu.set_defaults(func=_cmd_gpu)
 
     up = sub.add_parser("up", help="plan, then start every service in order with one log file each")
     up.add_argument("config", help="path to models.yaml")
-    up.add_argument("--log-dir", default="logs")
+    up.add_argument("--log-dir", help="folder for logs and state; default: the remembered folder, asked for the first time")
     up.add_argument("--force", action="store_true", help="start even if the plan says a service will not fit")
     up.add_argument("--plan", action="store_true", help="always print the full plan (by default only a one-line summary when everything fits)")
     up.set_defaults(func=_cmd_up)
@@ -297,7 +303,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("status", "show running services", _cmd_status),
     ):
         p = sub.add_parser(name, help=help_text)
-        p.add_argument("--log-dir", default="logs")
+        p.add_argument("--log-dir", help="folder where `mesh up` keeps logs and state; default: the remembered folder")
         p.set_defaults(func=func)
 
     logs = sub.add_parser("logs", help="show a service's log")
@@ -305,7 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
     logs.add_argument("-n", "--lines", type=_line_count, default=50, metavar="N|all",
                       help="how many of the last lines to show (default 50), or 'all' for the whole log")
     logs.add_argument("-f", "--follow", action="store_true", help="keep printing new lines until Ctrl+C")
-    logs.add_argument("--log-dir", default="logs")
+    logs.add_argument("--log-dir", help="folder where `mesh up` keeps logs and state; default: the remembered folder")
     logs.set_defaults(func=_cmd_logs)
 
     comp = sub.add_parser("completion", help="print a shell completion script (bash, zsh or fish)")
@@ -315,7 +321,7 @@ def build_parser() -> argparse.ArgumentParser:
     # Used by the completion scripts; hidden from --help.
     hidden = sub.add_parser("_complete")
     hidden.add_argument("what", choices=["services"])
-    hidden.add_argument("--log-dir", default="logs")
+    hidden.add_argument("--log-dir")
     hidden.set_defaults(func=_cmd_complete)
     return parser
 
@@ -324,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (ConfigError, GpuError, PlanError) as exc:
+    except (ConfigError, GpuError, PlanError, settings.SettingsError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

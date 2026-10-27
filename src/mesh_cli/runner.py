@@ -18,6 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .config import Config, Service
+from .settings import tidy
 
 STATE_FILE = "state.json"
 
@@ -303,7 +304,7 @@ def run_up(
         for number, svc in enumerate(config.services, 1):
             before = snapshot() if snapshot else None
             file = log_path(log_dir, svc.name)
-            out(f"[{number}/{total}] starting {svc.name} on port {svc.port}  (log: {file})")
+            out(f"[{number}/{total}] starting {svc.name} on port {svc.port}  (log: {tidy(file)})")
             proc = start_service(svc, log_dir)
             started.append((svc, proc))
             state["services"][svc.name] = {"pid": proc.pid, "port": svc.port, "health": svc.health, "stop": svc.stop, "command": svc.command, "log": str(file)}

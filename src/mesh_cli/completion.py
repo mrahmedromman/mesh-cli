@@ -98,11 +98,11 @@ _mesh() {{
     case "$cmd" in
         plan|up) COMPREPLY=($(compgen -f -- "$cur")) ;;
         logs)
-            logdir=logs
+            logdir=()
             for ((i = 1; i < COMP_CWORD; i++)); do
-                if [ "${{COMP_WORDS[i]}}" = "--log-dir" ]; then logdir="${{COMP_WORDS[i+1]}}"; fi
+                if [ "${{COMP_WORDS[i]}}" = "--log-dir" ]; then logdir=(--log-dir "${{COMP_WORDS[i+1]}}"); fi
             done
-            COMPREPLY=($(compgen -W "$(mesh _complete services --log-dir "$logdir" 2>/dev/null)" -- "$cur"))
+            COMPREPLY=($(compgen -W "$(mesh _complete services "${{logdir[@]}}" 2>/dev/null)" -- "$cur"))
             ;;
         completion) COMPREPLY=($(compgen -W "{shells}" -- "$cur")) ;;
     esac
@@ -133,8 +133,9 @@ def zsh(parser: argparse.ArgumentParser) -> str:
     return f"""#compdef mesh
 # zsh completion for mesh. Add to ~/.zshrc (after compinit):  eval "$(mesh completion zsh)"
 _mesh_services() {{
-    local -a names
-    names=(${{(f)"$(mesh _complete services --log-dir "${{opt_args[--log-dir]:-logs}}" 2>/dev/null)"}})
+    local -a names dir
+    [[ -n ${{opt_args[--log-dir]}} ]] && dir=(--log-dir "${{opt_args[--log-dir]}}")
+    names=(${{(f)"$(mesh _complete services $dir 2>/dev/null)"}})
     _describe 'service' names
 }}
 

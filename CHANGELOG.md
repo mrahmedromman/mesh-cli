@@ -6,7 +6,11 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+- `mesh status`, `mesh down`, `mesh logs` and `mesh gpu` only worked from the folder where `mesh up` was run,
+  because logs and state defaulted to `logs/` in the current directory. `mesh up` now asks once which folder to
+  use (suggesting `~/mesh-deck`), remembers it in `~/.config/mesh-deck.json`, and every command uses it from any
+  directory. `--log-dir` still overrides it. Without a terminal it never asks and falls back to `logs/` as before.
 
 ## [0.1.0] - 2026-10-26
 

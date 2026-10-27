@@ -27,7 +27,7 @@ silently ignored. Service names and ports must be unique.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `name` | yes | Used in output, log file names (`logs/NAME.log`) and `mesh logs NAME`. |
+| `name` | yes | Used in output, log file names (`NAME.log`) and `mesh logs NAME`. |
 | `port` | yes | Port polled for the health check. Must be unique across services. |
 | `gpus` | yes | List of GPU indexes the service uses, as `nvidia-smi` numbers them. |
 | `command` | for `up` | Shell snippet run with `bash -c`. See [Writing a command](#writing-a-command). Not needed for `plan`. |
@@ -73,7 +73,7 @@ else was using the GPU at the same moment.
 
 ## Writing a command
 
-`command` is run as `bash -c <command>`, in its own process group, with output written to `logs/NAME.log`.
+`command` is run as `bash -c <command>`, in its own process group, with output written to `NAME.log` in your mesh folder (see [Where files go](commands.md#where-files-go)).
 
 - **End with `exec`.** `exec vllm serve ...` replaces the shell with the program, so Ctrl+C and `mesh down`
   reach the real process.
