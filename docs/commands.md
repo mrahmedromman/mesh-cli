@@ -128,6 +128,11 @@ exits, so it never waits for a key.
 `mesh down`, run from another terminal, asks the `mesh up` process to shut down gracefully, so the result is the
 same as pressing Ctrl+C there. If that process is gone, it stops each recorded service itself.
 
+The state file records when each process began, next to its process id. After a crash or a reboot the same id may
+belong to another program; `mesh` then ignores it: `mesh up` is not refused because of it, and `mesh down` does
+not signal it (it still runs the service's `stop` command, such as `docker stop NAME`). A service that is really
+still running, for example after `mesh up` was killed, is found and stopped as before.
+
 ### Shutdown messages
 
 Stopping prints progress, one service at a time in reverse start order, and ends with a completion line. This is

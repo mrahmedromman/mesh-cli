@@ -202,6 +202,13 @@ def test_services_from_state():
     assert holders.services_from_state(None) == {}
 
 
+def test_services_from_state_ignores_a_pid_that_now_belongs_to_another_program():
+    import os
+
+    state = {"services": {"llm": {"pid": os.getpid(), "started": "someone-else:1"}}}  # a live process, but not the one mesh started
+    assert holders.services_from_state(state) == {}
+
+
 def test_linux_procfs_parses_parent_and_command_line(monkeypatch):
     files = {
         "/proc/9/stat": "9 (my (odd) name) S 456 9 9 0 -1 4194560",  # the name may contain spaces and parentheses
