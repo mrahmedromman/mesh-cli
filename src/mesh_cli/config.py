@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from .suggest import did_you_mean
 
@@ -40,6 +41,28 @@ class Service(BaseModel):
     start_timeout_s: int = Field(default=900, gt=0)
     # How long to wait for the service to stop after it is asked to (SIGTERM, and its `stop` command) before it is killed.
     stop_timeout_s: int = Field(default=30, gt=0)
+
+    @field_validator("name")
+    @classmethod
+    def _name_works_as_a_file_name(cls, value: str) -> str:
+        if "/" in value or "\\" in value or "\0" in value or value in (".", ".."):
+            raise ValueError(f"{value!r} is also the name of its log file (NAME.log), so a service name cannot contain / or \\ or be . or ..")
+        return value
+
+    @field_validator("gpus")
+    @classmethod
+    def _each_gpu_once(cls, value: list[int]) -> list[int]:
+        repeated = _duplicates(value)
+        if repeated:
+            raise ValueError(f"gpus lists GPU {', '.join(map(str, repeated))} more than once")
+        return value
+
+    @field_validator("health")
+    @classmethod
+    def _health_is_a_path(cls, value: str) -> str:
+        if not re.fullmatch(r"/\S*", value):  # anything else makes an invalid address, and the service would never look healthy
+            raise ValueError(f"health must be a path that starts with / and has no spaces, for example /v1/models (got {value!r})")
+        return value
 
     @model_validator(mode="after")
     def _measured_gpus_are_used(self) -> Service:

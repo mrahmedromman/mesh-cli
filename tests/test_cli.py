@@ -651,3 +651,11 @@ def test_up_exits_one_when_the_clean_up_left_a_service_running(tmp_path, monkeyp
     assert "could not be stopped" in capsys.readouterr().err
     monkeypatch.setattr(cli_module.runner, "run_up", lambda *a, **k: 0)
     assert main(["up", cfg, "--log-dir", str(tmp_path / "logs")]) == 0
+
+
+def test_a_bad_health_path_is_rejected_at_once_and_nothing_is_started(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli_module.runner, "run_up", lambda *a, **k: pytest.fail("must not start anything"))
+    cfg = write_cfg(tmp_path, "services:\n  - {name: svc, port: 8001, gpus: [0], health: health, command: 'true'}\n")
+    logs = tmp_path / "logs"
+    assert main(["up", cfg, "--log-dir", str(logs)]) == 2
+    assert "services.0.health" in capsys.readouterr().err and not logs.exists()

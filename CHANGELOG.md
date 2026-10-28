@@ -22,6 +22,12 @@ All notable changes to this project are recorded here. The format follows
   the services that did stop are removed. The clean-up at the end of `mesh up` does the same, and `mesh up` then
   exits with code 1. When the `mesh up` that `mesh down` asked to stop ends without finishing its clean-up,
   `mesh down` now stops what is left itself, at once, instead of waiting for it.
+- Three mistakes in `models.yaml` failed late, or silently, and are now rejected when the config is loaded, with the
+  field name in the message. `health: health` (no leading `/`) built an invalid address, so a healthy service never
+  looked healthy and `mesh up` waited out the whole `start_timeout_s` (15 minutes by default) before reporting a
+  timeout; `health` must now start with `/` and have no spaces. A service name such as `my/model` crashed `mesh up`
+  with a Python traceback when it tried to open `my/model.log`; a name cannot now contain `/` or `\` or be `.` or
+  `..`. `gpus: [0, 0]` counted the service's memory twice in the plan; a GPU can only be listed once.
 
 ## [0.1.3] - 2026-10-28 (Latest)
 

@@ -85,3 +85,43 @@ def test_stop_timeout_must_be_positive(tmp_path, value):
     path = write(tmp_path, f"services:\n  - {{name: a, port: 1, gpus: [0], stop_timeout_s: {value}}}\n")
     with pytest.raises(ConfigError, match="stop_timeout_s"):
         load_config(path)
+
+
+# --- mistakes that used to fail late or silently are rejected when the config is loaded --------------------------------
+
+
+def one_service(tmp_path, **fields):
+    text = ", ".join(f"{key}: {value}" for key, value in {"name": "a", "port": 1, "gpus": "[0]", **fields}.items())
+    return write(tmp_path, f"services:\n  - {{{text}}}\n")
+
+
+@pytest.mark.parametrize("health", ["health", "v1/models", "http://127.0.0.1:8000/health", "' /health'", "'/health '", "'/he alth'"])
+def test_health_must_be_a_path_that_starts_with_a_slash_and_has_no_spaces(tmp_path, health):
+    with pytest.raises(ConfigError, match=r"services\.0\.health: .*health must be a path that starts with /"):
+        load_config(one_service(tmp_path, health=health))
+
+
+@pytest.mark.parametrize("health", ["/", "/health", "/v1/models", "/health?ready=1", "/docs"])
+def test_ordinary_health_paths_are_accepted(tmp_path, health):
+    assert load_config(one_service(tmp_path, health=f'"{health}"')).services[0].health == health
+
+
+@pytest.mark.parametrize("name", ['"my/model"', "'a\\b'", '"."', '".."', '"../x"'])
+def test_a_service_name_must_work_as_a_file_name(tmp_path, name):
+    with pytest.raises(ConfigError, match=r"services\.0\.name: .*cannot contain / or \\ or be . or \.\."):
+        load_config(one_service(tmp_path, name=name))
+
+
+@pytest.mark.parametrize("name", ["qwen3.5", '"whisper v3"', "llm-1", ".hidden", "üñí"])
+def test_ordinary_service_names_are_accepted(tmp_path, name):
+    assert load_config(one_service(tmp_path, name=name)).services[0].name == name.strip('"')
+
+
+def test_a_gpu_listed_twice_is_rejected(tmp_path):
+    with pytest.raises(ConfigError, match=r"services\.0\.gpus: .*lists GPU 0 more than once"):
+        load_config(one_service(tmp_path, gpus="[0, 0]"))
+
+
+@pytest.mark.parametrize("gpus", ["[0]", "[0, 1]", "[1, 0]"])
+def test_each_gpu_once_is_fine(tmp_path, gpus):
+    assert load_config(one_service(tmp_path, gpus=gpus)).services[0].gpus == eval(gpus)
