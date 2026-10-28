@@ -74,7 +74,7 @@ def test_plan_view_shows_each_service_the_memory_and_a_suggestion():
     con = recording()
     ui.print_plan(plan, budgets, con)
     out = text_of(con)
-    assert "Plan for 2 services on 1 GPUs" in out
+    assert "Plan for 2 services on 1 GPU" in out and "1 GPUs" not in out
     assert "NVIDIA GeForce RTX 4090" in out and "✓ fits" in out and "✗ does not fit" in out
     assert "try --gpu-memory-utilization" in out
     assert "After all services start" in out and "MiB" in out

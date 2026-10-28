@@ -1,3 +1,4 @@
+import types
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from mesh_cli.cli import main
 from mesh_cli.config import Config
 from mesh_cli.gpu import Gpu, GpuError, parse_gpu_query
 from mesh_cli.holders import GpuReport, Holder
+from mesh_cli.planner import Plan, ServicePlan
 
 FIXTURE = str(Path(__file__).parent / "fixtures" / "gpu_query_running.csv")
 EXTERNAL = "0=417,1=4"
@@ -201,7 +203,7 @@ def run_up_with_fake_start(tmp_path, monkeypatch, capsys, extra=(), services="  
 
 def test_up_prints_one_line_when_everything_fits(tmp_path, monkeypatch, capsys):
     out = run_up_with_fake_start(tmp_path, monkeypatch, capsys)
-    assert "Plan: all 1 services fit on 1 GPUs. Free once they are up: GPU 0: " in out
+    assert "Plan: the service fits on 1 GPU. Free once it is up: GPU 0: " in out
     assert "After all services start" not in out
 
 
@@ -529,3 +531,54 @@ def test_up_shows_holders_when_the_memory_error_is_far_above_the_end_of_the_log(
     assert main(["up", cfg, "--log-dir", str(tmp_path / "logs")]) == 1
     assert "Who is holding GPU memory now" in capsys.readouterr().out
     assert calls == [None]
+
+
+# --- wording: plurals, and what --force really does -------------------------------------------------------------------
+
+
+def test_the_plan_summary_uses_the_right_plurals():
+    one = cli_module._plan_summary(types.SimpleNamespace(services=[1], free_after_mib={0: 5}), [1])
+    many = cli_module._plan_summary(types.SimpleNamespace(services=[1, 2], free_after_mib={0: 5, 1: 6}), [1, 2])
+    assert one == "Plan: the service fits on 1 GPU. Free once it is up: GPU 0: 5 MiB."
+    assert many == "Plan: all 2 services fit on 2 GPUs. Free once they are up: GPU 0: 5 MiB, GPU 1: 6 MiB."
+
+
+def test_the_plain_plan_header_uses_the_right_plurals():
+    gpu = [cli_module.GpuBudget(0, 24000, 0, "Card", 500)]
+    one = Plan([], {0: 1}, [])
+    assert cli_module._render(one, gpu).startswith("Plan for 0 services on 1 GPU\n")
+    assert cli_module._render(Plan([ServicePlan("a", [])], {0: 1}, []), gpu).startswith("Plan for 1 service on 1 GPU\n")
+
+
+def test_force_is_not_offered_as_a_way_to_make_it_fit(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli_module, "read_gpus", lambda: [Gpu(0, "GPU-0", "Test GPU", 24564, 20000, 4000)])
+    cfg = write_cfg(tmp_path, "services:\n" + TIGHT)
+    assert main(["up", cfg, "--log-dir", str(tmp_path / "logs")]) == 1
+    out = capsys.readouterr().out
+    assert "Fix the config or free the memory." in out
+    assert "--force skips this check, but the service will probably still fail." in out
+    assert "start anyway" not in out
+
+
+def test_the_recheck_message_says_what_force_does(monkeypatch):
+    monkeypatch.setattr(cli_module, "read_gpus", lambda: [Gpu(0, "GPU-0", "Test GPU", 24564, 17000, 7000)])
+    with pytest.raises(cli_module.runner.NotEnoughMemory) as caught:
+        cli_module._recheck_memory(service_of(TIGHT))
+    message = str(caught.value)
+    assert "Free the memory (the table below shows who holds it) or lower gpu_memory_utilization." in message
+    assert "--force skips this check, but the service will probably still fail." in message
+    assert "start anyway" not in message
+
+
+def test_the_help_texts_describe_force_and_status():
+    parser = cli_module.build_parser()
+    commands = next(a for a in parser._actions if hasattr(a, "choices") and a.choices).choices
+
+    def words(text):  # help is wrapped to the terminal width
+        return " ".join(text.split())
+
+    top = words(parser.format_help())
+    assert "live view of every service" in top and "show running services" not in top
+    up = words(commands["up"].format_help())
+    assert "skip the memory checks" in up and "usually still fails" in up
+    assert "name of a service in your config" in words(commands["logs"].format_help())

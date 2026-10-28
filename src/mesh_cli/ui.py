@@ -101,9 +101,13 @@ def style_line(line: str) -> Text:
     return text
 
 
+def plural(count: int, word: str) -> str:
+    return f"{count} {word}" + ("" if count == 1 else "s")
+
+
 def print_plan(plan: Plan, budgets: list[GpuBudget], con: Console | None = None) -> None:
     con = con or console()
-    con.print(Text(f"Plan for {len(plan.services)} services on {len(budgets)} GPUs", style="bold"))
+    con.print(Text(f"Plan for {plural(len(plan.services), 'service')} on {plural(len(budgets), 'GPU')}", style="bold"))
 
     gpus = Table(box=box.SIMPLE_HEAD, pad_edge=False)
     _columns(gpus, (("GPU", "left"), ("Card", "left"), ("Total", "right"), ("Reserved", "right"), ("In use by others", "left")))

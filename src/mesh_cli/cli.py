@@ -61,7 +61,8 @@ def _recheck_memory(svc: Service) -> None:
         )
         raise runner.NotEnoughMemory(
             f"{svc.name} would not fit right now, so it was not started: {lines}. Something took GPU memory after the plan "
-            "was made. Use --force to start anyway.",
+            "was made. Free the memory (the table below shows who holds it) or lower gpu_memory_utilization. "
+            "--force skips this check, but the service will probably still fail.",
             {c.gpu for c in short},
         )
 
@@ -86,7 +87,7 @@ def _line_count(value: str) -> int | None:
 
 
 def _render(plan: Plan, budgets: list[GpuBudget]) -> str:
-    lines = [f"Plan for {len(plan.services)} services on {len(budgets)} GPUs", ""]
+    lines = [f"Plan for {ui.plural(len(plan.services), 'service')} on {ui.plural(len(budgets), 'GPU')}", ""]
     for b in budgets:
         lines.append(f"GPU {b.index}  {b.name}  total {b.total_mib} MiB, driver-reserved {b.reserved_mib}, external {b.external_mib} MiB")
     lines.append("")
@@ -169,7 +170,10 @@ def _show_plan(plan: Plan, budgets: list[GpuBudget]) -> None:
 
 def _plan_summary(plan: Plan, budgets: list[GpuBudget]) -> str:
     free = ", ".join(f"GPU {i}: {mib} MiB" for i, mib in sorted(plan.free_after_mib.items()))
-    return f"Plan: all {len(plan.services)} services fit on {len(budgets)} GPUs. Free once they are up: {free}."
+    gpus = ui.plural(len(budgets), "GPU")
+    if len(plan.services) == 1:
+        return f"Plan: the service fits on {gpus}. Free once it is up: {free}."
+    return f"Plan: all {len(plan.services)} services fit on {gpus}. Free once they are up: {free}."
 
 
 def _plan_has_news(plan: Plan) -> bool:
@@ -215,7 +219,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
         else:
             print(_plan_summary(plan, budgets))
         if not plan.ok and not args.force:
-            print("\nThe plan does not fit. Fix the config, or start anyway with --force.")
+            print("\nThe plan does not fit. Fix the config or free the memory. --force skips this check, but the service will probably still fail.")
             short = {c.gpu for s in plan.services for c in s.checks if not c.ok}
             _show_holders(log_dir, "Who is holding memory on the GPUs that are short:", short)
             return 1
@@ -361,20 +365,20 @@ def build_parser() -> argparse.ArgumentParser:
     up = sub.add_parser("up", help="plan, then start every service in order with one log file each")
     up.add_argument("config", help="path to models.yaml")
     up.add_argument("--log-dir", help="folder for logs and state; default: the remembered folder, asked for the first time")
-    up.add_argument("--force", action="store_true", help="start even if the plan says a service will not fit")
+    up.add_argument("--force", action="store_true", help="skip the memory checks (the plan, and the one before each service starts); a service without its memory usually still fails")
     up.add_argument("--plan", action="store_true", help="always print the full plan (by default only a one-line summary when everything fits)")
     up.set_defaults(func=_cmd_up)
 
     for name, help_text, func in (
         ("down", "stop a stack started with `mesh up`", _cmd_down),
-        ("status", "show running services", _cmd_status),
+        ("status", "live view of every service (press q to quit)", _cmd_status),
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("--log-dir", help="folder where `mesh up` keeps logs and state; default: the remembered folder")
         p.set_defaults(func=func)
 
     logs = sub.add_parser("logs", help="show a service's log")
-    logs.add_argument("service")
+    logs.add_argument("service", help="name of a service in your config")
     logs.add_argument("-n", "--lines", type=_line_count, default=50, metavar="N|all",
                       help="how many of the last lines to show (default 50), or 'all' for the whole log")
     logs.add_argument("-f", "--follow", action="store_true", help="keep printing new lines until Ctrl+C")
