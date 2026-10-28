@@ -4,7 +4,7 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.4] - 2026-10-28 (Latest)
+## [0.1.4] - 2026-10-29 (Latest)
 
 ### Changed
 - New page, [Using mesh-deck on a shared server](docs/shared-server.md): what `mesh` does and does not do when several
