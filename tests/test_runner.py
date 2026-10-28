@@ -1,6 +1,7 @@
 """Runner tests use throwaway http.server processes instead of real models."""
 
 import errno
+import fcntl
 import os
 import signal
 import socket
@@ -1347,3 +1348,16 @@ def test_a_live_controller_is_found_in_the_state_and_a_dead_or_recycled_one_is_n
     assert not runner.controller_alive({"controller_pid": sleeper.pid, "controller_started": stamp})
     assert not runner.controller_alive({"controller_pid": os.getpid()})  # ourselves do not count
     assert not runner.controller_alive({}) and not runner.controller_alive(None)
+
+
+def test_the_refusal_names_the_holder_even_when_it_writes_its_pid_a_moment_after_locking(tmp_path):
+    fd = os.open(tmp_path / runner.LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)  # locked, but the pid is not written yet
+    writer = threading.Timer(0.2, lambda: os.write(fd, b"4242\n"))
+    writer.start()
+    try:
+        with pytest.raises(runner.RunError, match=r"\(pid 4242\)"):
+            runner.take_lock(tmp_path)
+    finally:
+        writer.join()
+        os.close(fd)

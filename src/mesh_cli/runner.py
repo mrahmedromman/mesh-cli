@@ -280,7 +280,11 @@ def take_lock(log_dir: Path) -> int | None:
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        holder = os.read(fd, 32).decode(errors="replace").strip()
+        for _ in range(10):  # the holder writes its pid a moment after it locks
+            holder = os.read(fd, 32).decode(errors="replace").strip()
+            if holder.isdigit():
+                break
+            time.sleep(0.05)
         os.close(fd)
         who = f" (pid {holder})" if holder.isdigit() else ""
         raise RunError(f"another mesh up is already using this folder{who}. Wait for it, or stop it with: mesh down") from None
