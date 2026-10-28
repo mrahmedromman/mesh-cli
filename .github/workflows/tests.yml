@@ -5,6 +5,10 @@ on:
   push:
   workflow_dispatch:
 
+# The token these jobs get can only read the repository.
+permissions:
+  contents: read
+
 jobs:
   # Installs the package and runs the test suite once per Python version, on a fresh Linux machine each time.
   test:

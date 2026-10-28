@@ -14,6 +14,11 @@ on:
     types: [published]
   workflow_dispatch:
 
+# The build job can only read the repository. The two publishing jobs below ask for the one extra permission they
+# need (a token that lets PyPI verify this workflow's identity), and nothing else.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-24.04
