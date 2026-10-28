@@ -247,7 +247,7 @@ modes.
 |---|---|
 | 0 | Success. |
 | 1 | `plan`: a service will not fit. `up`: the plan does not fit (without `--force`), the memory ran short before a service started, a service failed to start, a stack is already running, or a service could not be stopped when it ended. `down`: a service could not be stopped. `logs`: no such log file. |
-| 2 | Bad config, unreadable `nvidia-smi` output, or a bad command line. |
+| 2 | Bad config, unreadable `nvidia-smi` output, a bad command line, or a file or folder problem (for example a log folder that cannot be created). |
 
 ## Where files go
 

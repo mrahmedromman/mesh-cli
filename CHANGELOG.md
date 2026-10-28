@@ -28,6 +28,9 @@ All notable changes to this project are recorded here. The format follows
   timeout; `health` must now start with `/` and have no spaces. A service name such as `my/model` crashed `mesh up`
   with a Python traceback when it tried to open `my/model.log`; a name cannot now contain `/` or `\` or be `.` or
   `..`. `gpus: [0, 0]` counted the service's memory twice in the plan; a GPU can only be listed once.
+- A file or folder problem, such as a `--log-dir` that cannot be created or a log that is not a file, ended in a long
+  Python traceback. It is now one line, `error: Not a directory: /dev/null/nope`, with exit code 2. Piping
+  `mesh logs NAME | head` also printed a `BrokenPipeError` traceback when `head` closed the pipe; it now ends quietly.
 
 ## [0.1.3] - 2026-10-28 (Latest)
 

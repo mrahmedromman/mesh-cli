@@ -412,12 +412,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _os_error_message(exc: OSError) -> str:
+    """`Not a directory: /dev/null/nope`, instead of Python's `[Errno 20] Not a directory: ...`."""
+    return f"{exc.strerror}: {exc.filename}" if exc.strerror and exc.filename else str(exc)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
     except (ConfigError, GpuError, PlanError, settings.SettingsError) as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except BrokenPipeError:  # the reader stopped early (`mesh logs x | head`): nothing to report
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())  # or Python complains again while it closes stdout
+        except (OSError, ValueError):
+            pass
+        return 1
+    except OSError as exc:  # a file or folder problem (no permission, not a folder, disk full): one line, not a traceback
+        print(f"error: {_os_error_message(exc)}", file=sys.stderr)
         return 2
 
 

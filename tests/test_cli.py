@@ -1,5 +1,7 @@
+import errno
 import json
 import subprocess
+import sys
 import types
 from pathlib import Path
 
@@ -659,3 +661,48 @@ def test_a_bad_health_path_is_rejected_at_once_and_nothing_is_started(tmp_path, 
     logs = tmp_path / "logs"
     assert main(["up", cfg, "--log-dir", str(logs)]) == 2
     assert "services.0.health" in capsys.readouterr().err and not logs.exists()
+
+
+# --- file and folder problems are one error line, not a Python traceback -----------------------------------------------
+
+
+def test_the_error_names_the_file_and_the_reason():
+    assert cli_module._os_error_message(OSError(errno.ENOENT, "No such file or directory", "/x/y.log")) == "No such file or directory: /x/y.log"
+    assert cli_module._os_error_message(OSError("disk full")) == "disk full"
+
+
+def test_up_with_a_log_folder_that_cannot_be_created_is_a_clean_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    monkeypatch.setattr(cli_module.runner, "port_in_use", lambda port: False)
+    cfg = write_cfg(tmp_path, "services:\n" + TIGHT)
+    assert main(["up", cfg, "--log-dir", "/dev/null/nope"]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and "/dev/null/nope" in err and "Traceback" not in err and err.count("\n") == 1
+
+
+def test_logs_of_something_that_is_not_a_file_is_a_clean_error(tmp_path, capsys):
+    (tmp_path / "svc.log").mkdir()  # works for root too, unlike a file without read permission
+    assert main(["logs", "svc", "--log-dir", str(tmp_path)]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("error: Is a directory") and str(tmp_path / "svc.log") in err
+
+
+def test_a_broken_pipe_ends_quietly(monkeypatch, capsys):
+    def reader_went_away(args):
+        raise BrokenPipeError(errno.EPIPE, "Broken pipe")
+
+    monkeypatch.setattr(cli_module, "_cmd_gpu", reader_went_away)
+    assert main(["gpu"]) == 1
+    captured = capsys.readouterr()
+    assert captured.err == "" and "error" not in captured.out
+
+
+def test_piping_mesh_logs_into_head_prints_no_traceback(tmp_path):
+    (tmp_path / "big.log").write_text("".join(f"line {i}\n" for i in range(300_000)))
+    reader = subprocess.Popen([sys.executable, "-m", "mesh_cli", "logs", "big", "-n", "all", "--log-dir", str(tmp_path)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    assert reader.stdout.readline() == "line 0\n"
+    reader.stdout.close()  # like `| head -1`
+    err = reader.stderr.read()
+    reader.wait(timeout=30)
+    assert err == "" and reader.returncode == 1
