@@ -23,6 +23,12 @@ real output from it is worth more than code.
    `tests/test_planner.py` that parses it. If the planned memory is wrong for your card, say so in the pull
    request. That is a bug we want to know about.
 
+## Health paths for other engines
+
+The [table of health paths](docs/config.md#health-paths-for-common-engines) was put together from documentation and
+third-party guides. If you run another engine, or find a path that is wrong for your version, open an issue with the
+engine, its version, the path, and what `curl -i` showed while the model was loading and once it was ready.
+
 ## Reporting a bug
 
 Open an issue with:

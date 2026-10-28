@@ -1,6 +1,6 @@
 # How it works
 
-Back to the [README](../README.md) · [Commands](commands.md) · [Config reference](config.md)
+Back to the [README](../README.md) · [Commands](commands.md) · [Config reference](config.md) · [Shared servers](shared-server.md)
 
 ## The problem
 

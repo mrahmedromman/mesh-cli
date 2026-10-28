@@ -1,6 +1,6 @@
 # Commands
 
-Back to the [README](../README.md) · [Config reference](config.md) · [How it works](how-it-works.md)
+Back to the [README](../README.md) · [Config reference](config.md) · [How it works](how-it-works.md) · [Shared servers](shared-server.md)
 
 | Command | What it does |
 |---|---|
@@ -115,6 +115,11 @@ Each holder is one of:
   by a crash shows up.
 - **unattributed**: memory in use that no listed process accounts for (driver overhead, or processes you are not
   allowed to see).
+
+For another program, `mesh gpu` shows the first 80 characters of its command line: the same text `ps` shows to every
+user on the machine. If a token or key was passed to that program as an argument, it can be in those characters, so
+look at the output before you paste it into an issue, a chat or a post. (A secret passed in the environment or in a
+file stays out of process listings.) The command of a service that `mesh` recognises as its own is not printed.
 
 On some systems (WSL2 and some containers) `nvidia-smi` prints `[N/A]` instead of a process's memory. The process is
 still listed, with 0 MiB, and the memory nobody can account for then shows under **unattributed**.

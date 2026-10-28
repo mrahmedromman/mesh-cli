@@ -6,6 +6,16 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- New page, [Using mesh-deck on a shared server](docs/shared-server.md): what `mesh` does and does not do when several
+  people or terminals are involved, for one account, separate accounts and one shared account, with the messages you
+  may see.
+- The config reference now has a table of the health paths of common engines (vLLM, llama.cpp, SGLang, TGI, Ollama,
+  ComfyUI, FastAPI, Triton), where each entry comes from, how to check your own with `curl -i`, and the one known
+  limit: Triton's readiness path answers `4xx` when it is not ready, which `mesh` counts as up.
+- The docs now say that `mesh gpu` shows the first 80 characters of other programs' command lines, the same text `ps`
+  shows to every user, so the output should be checked before it is pasted into an issue or a chat.
+
 ### Fixed
 - Two `mesh up` started at the same moment in the same folder were both allowed. Each one checked for a running stack
   before either had written anything, so both started, and the state file then listed only one of the two stacks, so

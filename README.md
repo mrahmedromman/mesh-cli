@@ -19,6 +19,7 @@
   <a href="https://github.com/mrahmedromman/mesh-deck/blob/main/docs/commands.md">Commands</a> ·
   <a href="https://github.com/mrahmedromman/mesh-deck/blob/main/docs/config.md">Config</a> ·
   <a href="https://github.com/mrahmedromman/mesh-deck/blob/main/docs/how-it-works.md">How it works</a> ·
+  <a href="https://github.com/mrahmedromman/mesh-deck/blob/main/docs/shared-server.md">Shared servers</a> ·
   <a href="https://github.com/mrahmedromman/mesh-deck/blob/main/CONTRIBUTING.md">Contributing</a>
 </p>
 
@@ -68,7 +69,8 @@ around vLLM's `gpu_memory_utilization` fraction. For another engine (llama.cpp, 
 script), leave out the fraction and give the service `measured_mib` instead: run `mesh up` once, copy the
 printed "memory it added" numbers, and the planner uses them. Set `health` to a path your engine answers on, since
 the default is `/v1/models`. An answer of 500 or more (for example `503` while it loads) counts as not ready yet.
-This has not been tested with engines other than vLLM yet; if you try one, please
+The [config reference](https://github.com/mrahmedromman/mesh-deck/blob/main/docs/config.md#health-paths-for-common-engines)
+lists the paths of common engines. This has not been tested with engines other than vLLM yet; if you try one, please
 [open an issue](https://github.com/mrahmedromman/mesh-deck/issues) with what worked.
 
 ## Install

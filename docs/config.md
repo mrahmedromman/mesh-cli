@@ -1,6 +1,6 @@
 # models.yaml reference
 
-Back to the [README](../README.md) · [Commands](commands.md) · [How it works](how-it-works.md)
+Back to the [README](../README.md) · [Commands](commands.md) · [How it works](how-it-works.md) · [Shared servers](shared-server.md)
 
 Two complete examples: [examples/single-gpu.yaml](../examples/single-gpu.yaml) (a chat model and an embedding
 model on one card) and [examples/dual-gpu.yaml](../examples/dual-gpu.yaml) (four services on two cards).
@@ -142,6 +142,33 @@ OpenAI-compatible servers and `/docs` for FastAPI apps. If a service only answer
 another address, such as a LAN address (`--host 10.0.0.5`) or IPv6 (`::1`), is never seen: `mesh up` then waits
 the whole `start_timeout_s` (900 seconds by default), stops everything and reports that the service did not become
 healthy. Make the service listen on `127.0.0.1` as well, for example with `--host 0.0.0.0`.
+
+### Health paths for common engines
+
+`mesh` counts any answer below 500 as "up", so the path you choose must not answer below 500 until the model is
+ready. Pick a *readiness* path (it answers only once the model has loaded), not a *liveness* path (it answers as soon
+as the process runs). Kubernetes draws the same line, with a separate startup probe for slow starters.
+
+| Engine | `health` | Notes | Where this comes from |
+|---|---|---|---|
+| vLLM | `/v1/models` | The default. Some guides also use `/health`. | The OpenAI API route; `/health` from third-party guides |
+| llama.cpp server | `/health` | Answers `503` while the model loads, `200` when ready. | The project's server README |
+| SGLang | `/health` | `/health_generate` also exists. | The project's native API docs |
+| TGI | `/health` | | Third-party guides |
+| Ollama | `/` or `/api/tags` | There is no dedicated health path. `/` answers "Ollama is running". | Third-party guides |
+| ComfyUI | `/system_stats` | Core ComfyUI has no `/health` path. | Community API references |
+| FastAPI apps | `/docs` | | The framework's default documentation page (not checked here) |
+| Triton | `/v2/health/ready` | **Not safe yet**, see below. `/v2/health/live` only shows that the process is up. | The KServe v2 protocol docs |
+
+Triton answers `200` when it is ready and a `4xx` when it is not. `mesh` counts that `4xx` as "up", so it would start
+the next service too early. A setting to accept only chosen status codes is planned for a later release; until then,
+do not rely on Triton's readiness path.
+
+The table was checked in October 2026, and engines change. To check your own, start the service by hand and run
+`curl -i http://127.0.0.1:PORT/PATH` twice: while the model is still loading, it should give a `5xx` or no answer, and
+once it is ready, a `200`. If it answers `200` (or any code below 500) while loading, `mesh` would think the service is
+ready: choose another path. If your engine is missing or an entry is wrong, please
+[open an issue](https://github.com/mrahmedromman/mesh-deck/issues).
 
 Before anything starts, `mesh up` also checks that no other program is already listening on a service's port. A
 leftover process there would answer the health check and make a service that never started look healthy, so
