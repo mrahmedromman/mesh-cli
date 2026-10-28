@@ -1,10 +1,12 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from mesh_cli import cli as cli_module
 from mesh_cli import holders, settings
 from mesh_cli.cli import main
+from mesh_cli.config import Config
 from mesh_cli.gpu import Gpu, GpuError, parse_gpu_query
 from mesh_cli.holders import GpuReport, Holder
 
@@ -428,3 +430,83 @@ def test_status_shows_the_process_mesh_started_when_nvidia_smi_cannot_be_read(tm
     monkeypatch.setattr(cli_module.holders, "lookup_service_pids", unreadable)
     assert main(["status", "--log-dir", str(tmp_path)]) == 0
     assert capsys.readouterr().out.splitlines()[0].split()[:4] == ["llm", "running", "pid", "1"]
+
+
+# --- the memory is checked again right before each service starts ----------------------------------------------------
+
+TIGHT = "  - {name: svc, port: 8001, gpus: [0], gpu_memory_utilization: 0.5, command: 'true'}\n"
+
+
+def recheck_passed_to_run_up(tmp_path, monkeypatch, extra=()):
+    """Run `mesh up` with run_up faked, and return the recheck callable it was given (None if it got none)."""
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    given = []
+    monkeypatch.setattr(cli_module.runner, "run_up", lambda config, log_dir, **k: given.append(k.get("recheck")))
+    cfg = write_cfg(tmp_path, "services:\n" + TIGHT)
+    assert main(["up", cfg, "--log-dir", str(tmp_path / "logs"), *extra]) == 0
+    return given[0]
+
+
+def test_up_passes_a_recheck_to_run_up(tmp_path, monkeypatch):
+    assert recheck_passed_to_run_up(tmp_path, monkeypatch) is cli_module._recheck_memory
+
+
+def test_force_starts_without_a_recheck(tmp_path, monkeypatch):
+    assert recheck_passed_to_run_up(tmp_path, monkeypatch, extra=("--force",)) is None
+
+
+def service_of(text):
+    return Config.model_validate(yaml.safe_load("services:\n" + text)).services[0]
+
+
+def test_recheck_passes_while_the_memory_is_free(monkeypatch):
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)  # 24000 MiB free, the service needs about 12000
+    cli_module._recheck_memory(service_of(TIGHT))
+
+
+def test_recheck_refuses_when_something_took_the_memory(monkeypatch):
+    monkeypatch.setattr(cli_module, "read_gpus", lambda: [Gpu(0, "GPU-0", "Test GPU", 24564, 17000, 7000)])
+    with pytest.raises(cli_module.runner.NotEnoughMemory) as caught:
+        cli_module._recheck_memory(service_of(TIGHT))
+    message = str(caught.value)
+    assert "svc would not fit right now, so it was not started" in message
+    assert "GPU 0 needs 12000 MiB free but only 7000 MiB is free" in message
+    assert "--force" in message and caught.value.gpus == {0}
+
+
+def test_recheck_counts_the_memory_the_service_will_hold_not_only_its_start_need(monkeypatch):
+    # it could start (needs 2457 MiB free) but would then hold 20000 MiB, which is more than is free
+    monkeypatch.setattr(cli_module, "read_gpus", lambda: [Gpu(0, "GPU-0", "Test GPU", 24564, 15000, 9000)])
+    svc = service_of("  - {name: svc, port: 8001, gpus: [0], gpu_memory_utilization: 0.1, measured_mib: {0: 20000}, command: 'true'}\n")
+    with pytest.raises(cli_module.runner.NotEnoughMemory, match="needs 20000 MiB free but only 9000 MiB is free"):
+        cli_module._recheck_memory(svc)
+
+
+def test_recheck_is_skipped_when_nvidia_smi_cannot_be_read(monkeypatch):
+    def broken():
+        raise GpuError("nvidia-smi failed")
+
+    monkeypatch.setattr(cli_module, "read_gpus", broken)
+    cli_module._recheck_memory(service_of(TIGHT))
+
+
+def test_recheck_is_skipped_when_a_listed_gpu_has_disappeared(monkeypatch):
+    monkeypatch.setattr(cli_module, "read_gpus", lambda: [Gpu(1, "GPU-1", "Test GPU", 24564, 100, 24000)])
+    cli_module._recheck_memory(service_of(TIGHT))  # the service lists GPU 0, which is gone: nothing to compare
+
+
+def test_up_reports_a_refused_service_and_shows_who_holds_the_memory(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    shown = []
+    monkeypatch.setattr(holders, "gather", lambda log_dir, only=None, proc=None: shown.append(only) or fake_report())
+
+    def refusing_up(config, log_dir, **k):
+        raise cli_module.runner.NotEnoughMemory("svc would not fit right now, so it was not started: GPU 0 needs 1 MiB free but only 0 MiB is free.", {0})
+
+    monkeypatch.setattr(cli_module.runner, "run_up", refusing_up)
+    cfg = write_cfg(tmp_path, "services:\n" + TIGHT)
+    assert main(["up", cfg, "--log-dir", str(tmp_path / "logs")]) == 1
+    captured = capsys.readouterr()
+    assert "svc would not fit right now" in captured.err
+    assert "Who is holding memory on the GPUs that are short" in captured.out
+    assert shown == [{0}]

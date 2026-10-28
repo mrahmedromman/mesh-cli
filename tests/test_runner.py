@@ -1050,3 +1050,51 @@ def test_a_service_without_its_own_timeout_keeps_the_default_even_after_one_that
     runner.stop_all([("a", first.pid, None, first), ("b", second.pid, None, second)], 2, lines.append, graces={"a": 1})
     assert "  stopped a (force-killed after 1s)" in lines
     assert "  stopped b (force-killed after 2s)" in lines  # not 1s, left over from a
+
+
+# --- the memory is checked again right before each service starts ----------------------------------------------------
+
+
+def test_recheck_runs_before_each_service_in_order(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path), http_service("b", free_port(), tmp_path)])
+    seen = []
+    runner.run_up(config, tmp_path / "logs", hold=lambda: False, out=lambda _: None, health_interval=0.2, grace=5,
+                  recheck=lambda svc: seen.append(svc.name))
+    assert seen == ["a", "b"]
+
+
+def test_a_failed_recheck_stops_the_start_and_what_was_started(tmp_path):
+    a, b = free_port(), free_port()
+    config = Config(services=[http_service("a", a, tmp_path), http_service("b", b, tmp_path)])
+    lines = []
+
+    def recheck(svc):
+        if svc.name == "b":
+            raise runner.NotEnoughMemory("b would not fit right now", {0})
+
+    logs = tmp_path / "logs"
+    with pytest.raises(runner.NotEnoughMemory) as caught:
+        runner.run_up(config, logs, hold=lambda: False, out=lines.append, health_interval=0.2, grace=5, recheck=recheck)
+    assert caught.value.gpus == {0}
+    assert "      a is up" in "\n".join(lines) and "Stopping 1 service..." in lines
+    assert not runner.log_path(logs, "b").exists()  # b was never launched
+    assert not runner.port_in_use(a) and runner.read_state(logs) is None  # a was stopped and the state removed
+
+
+def test_a_failed_recheck_is_recorded_as_the_reason_while_the_stack_stops(tmp_path):
+    config = Config(services=[http_service("a", free_port(), tmp_path)])
+    logs = tmp_path / "logs"
+    states = []
+
+    def recheck(svc):
+        raise runner.NotEnoughMemory("a would not fit right now: GPU 0 needs 9 MiB free but only 1 MiB is free", {0})
+
+    original = runner.clear_state
+    runner.clear_state = lambda d: (states.append(runner.read_state(d)), original(d))[1]
+    try:
+        with pytest.raises(runner.NotEnoughMemory):
+            runner.run_up(config, logs, hold=lambda: False, out=lambda _: None, recheck=recheck)
+    finally:
+        runner.clear_state = original
+    assert states[0]["services"]["a"]["status"] == "failed"
+    assert states[0]["services"]["a"]["error"].startswith("a would not fit right now")

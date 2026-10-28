@@ -55,7 +55,11 @@ Behaviour on other GPUs, drivers and vLLM versions is not yet known. See
    given. Without `nvidia-smi` it skips the plan and the memory numbers and says so.
 2. Refuses to start if a previous stack from this log directory is still running (run `mesh down` first).
 3. Refuses to start if another program is already listening on any service's port, and names the port.
-4. Starts services one at a time, in the order listed. Each runs as `bash -c <command>` in its own process group.
+4. Right before each service starts, reads `nvidia-smi` again and checks that the memory free at that moment is
+   enough for it. The plan in step 1 was made when `mesh up` began, and earlier services take a while to load, so
+   another program may have taken memory since. If it is short, `mesh up` refuses to start that service, stops the
+   ones it already started, and says who holds the memory. `--force` skips this check. It cannot reserve memory:
+   something that grabs it after this check still makes the service fail at startup, as described in step 7.
 5. After starting a service it polls the `health` path until it answers with a status below 500 (a `503` while a
    model loads means "not ready yet"), or the service exits, or `start_timeout_s` passes.
 6. When a service is healthy it prints how much GPU memory it added.

@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from . import __version__, completion, holders, runner, settings, ui, watch
-from .config import ConfigError, load_config
+from .config import Config, ConfigError, Service, load_config
 from .gpu import GpuError, parse_gpu_query, read_gpus
 from .planner import GpuBudget, Plan, PlanError, make_plan
 from .suggest import did_you_mean
@@ -40,6 +40,30 @@ def _used_memory() -> dict[int, int] | None:
         return {g.index: g.used_mib for g in read_gpus()}
     except GpuError:
         return None
+
+
+def _recheck_memory(svc: Service) -> None:
+    """Called right before each service starts: refuse if the memory free now is too little for it.
+
+    The plan was made when `mesh up` began, and earlier services take a while to load. Another program may have taken
+    memory since. When nvidia-smi cannot be read, or a GPU has disappeared, there is nothing to check against.
+    """
+    try:
+        budgets = _budgets(read_gpus(), None)
+        checks = make_plan(Config(services=[svc], margin_mib=0), budgets).services[0].checks
+    except (GpuError, PlanError):
+        return
+    short = [c for c in checks if not c.ok]
+    if short:
+        lines = "; ".join(
+            f"GPU {c.gpu} needs {max(c.needed_mib or 0, c.footprint_mib or 0)} MiB free but only {c.free_before_mib} MiB is free"
+            for c in short
+        )
+        raise runner.NotEnoughMemory(
+            f"{svc.name} would not fit right now, so it was not started: {lines}. Something took GPU memory after the plan "
+            "was made. Use --force to start anyway.",
+            {c.gpu for c in short},
+        )
 
 
 def _parse_external(value: str) -> dict[int, int]:
@@ -197,15 +221,18 @@ def _cmd_up(args: argparse.Namespace) -> int:
             return 1
         print()
         snapshot = _used_memory
+    recheck = _recheck_memory if gpus is not None and not args.force else None  # --force starts whatever the memory says
     display = ui.StartupDisplay() if ui.fancy() else None
     try:
         if display:
-            runner.run_up(config, log_dir, snapshot=snapshot, out=display.out, progress=display.progress)
+            runner.run_up(config, log_dir, snapshot=snapshot, out=display.out, progress=display.progress, recheck=recheck)
         else:
-            runner.run_up(config, log_dir, snapshot=snapshot)
+            runner.run_up(config, log_dir, snapshot=snapshot, recheck=recheck)
     except runner.RunError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        if isinstance(exc, runner.ServiceExited) and _looks_like_memory_error(str(exc)):
+        if isinstance(exc, runner.NotEnoughMemory):
+            _show_holders(log_dir, "Who is holding memory on the GPUs that are short:", exc.gpus)
+        elif isinstance(exc, runner.ServiceExited) and _looks_like_memory_error(str(exc)):
             _show_holders(log_dir, "Who is holding GPU memory now (the services mesh started have been stopped):")
         return 1
     finally:

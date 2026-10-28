@@ -4,6 +4,15 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `mesh up` now checks the GPU memory again right before each service starts. The plan is made once, when `mesh up`
+  begins, and loading several models takes minutes, so another program may take memory in between. If the memory
+  free at that moment is too little for the next service, `mesh up` refuses to start it, stops the services it
+  already started, and shows how much is missing and who holds the memory. `--force` skips the check. Without
+  `nvidia-smi` there is nothing to check against and it is skipped.
+
 ## [0.1.1] - 2026-10-27 (Latest)
 
 ### Changed

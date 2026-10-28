@@ -42,6 +42,14 @@ class StartTimeout(RunError):
     pass
 
 
+class NotEnoughMemory(RunError):
+    """A service would not fit in the memory that is free right now. `gpus` are the GPUs that are short."""
+
+    def __init__(self, message: str, gpus: set[int]) -> None:
+        super().__init__(message)
+        self.gpus = gpus
+
+
 def log_path(log_dir: Path, name: str) -> Path:
     return Path(log_dir) / f"{name}.log"
 
@@ -443,8 +451,13 @@ def run_up(
     health_interval: float = 2.0,
     grace: float | None = None,
     progress: Callable[[str | None, float, str], None] | None = None,
+    recheck: Callable[[Service], None] | None = None,
 ) -> None:
     """Start every service in order. Blocks (while `hold()` is true, default forever), then stops everything.
+
+    `recheck(service)` is called right before each service starts. It raises NotEnoughMemory when the memory that is
+    free at that moment is too little (something else took it after the plan was made); the start is then
+    abandoned, and the services already started are stopped.
 
     `progress(name, seconds, last_log_line)` is called while a service loads; `progress(None, 0, "")` when it stops.
     `snapshot()` returns the memory used on each GPU, or None when it cannot be read: that only means "memory it
@@ -478,6 +491,12 @@ def run_up(
     try:
         write_state(log_dir, state)
         for number, svc in enumerate(config.services, 1):
+            if recheck:
+                try:
+                    recheck(svc)
+                except NotEnoughMemory as exc:
+                    mark(log_dir, state, svc.name, status="failed", error=str(exc).splitlines()[0])
+                    raise
             before = snapshot() if snapshot else None
             file = log_path(log_dir, svc.name)
             out(f"[{number}/{total}] starting {svc.name} on port {svc.port}  (log: {tidy(file)})")
