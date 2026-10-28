@@ -4,7 +4,7 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.2] - 2026-10-28 (Latest)
 
 ### Added
 - `mesh up` now checks the GPU memory again right before each service starts. The plan is made once, when `mesh up`
@@ -24,7 +24,7 @@ All notable changes to this project are recorded here. The format follows
   the real cause (`Free memory on device ...`) far above the traceback that ends the log, so the table of who holds
   the GPU memory was often not shown. It now searches the end of the whole log (the last 4 MiB).
 
-## [0.1.1] - 2026-10-27 (Latest)
+## [0.1.1] - 2026-10-27
 
 ### Changed
 - Pressing `q` in `mesh status` now leaves the last table on your terminal instead of clearing it, so the process
