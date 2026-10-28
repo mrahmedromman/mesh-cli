@@ -4,7 +4,7 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.4] - 2026-10-28 (Latest)
 
 ### Changed
 - New page, [Using mesh-deck on a shared server](docs/shared-server.md): what `mesh` does and does not do when several
@@ -46,7 +46,7 @@ All notable changes to this project are recorded here. The format follows
   memory nobody can account for shows as unattributed. A process row with missing columns is a clear
   `unexpected nvidia-smi row` error instead of a Python traceback.
 
-## [0.1.3] - 2026-10-28 (Latest)
+## [0.1.3] - 2026-10-28
 
 ### Changed
 - The two messages that refuse to start a service no longer suggest `--force` as a way out. They now say to free the
