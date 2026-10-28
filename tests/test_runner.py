@@ -1218,3 +1218,39 @@ def test_a_service_that_exits_reports_the_cause_and_a_clean_first_line(tmp_path)
     message = str(caught.value)
     assert message.splitlines()[0] == "a exited with status 1 before it became healthy."
     assert CAUSE in message and "Last log lines:" in message
+
+
+# --- the cause block shows the cause, not the traceback frames after it ----------------------------------------------
+
+
+def block_of(tmp_path, cause_and_after):
+    log = tmp_path / "svc.log"
+    log.write_text("\n".join(["INFO starting", *cause_and_after, *[f"filler {i}" for i in range(40)], "RuntimeError: see above"]) + "\n")
+    text = runner.failure_excerpt(log)
+    return text[len("Cause found earlier in the log:\n"): text.index("\n...\nLast log lines:")].splitlines()
+
+
+def test_the_cause_block_stops_before_a_traceback(tmp_path):
+    block = block_of(tmp_path, ["(EngineCore pid=4) ERROR " + CAUSE, "(EngineCore pid=4) Traceback (most recent call last):",
+                                '(EngineCore pid=4)   File "/usr/lib/python3.12/process.py", line 314, in _bootstrap'])
+    assert block == ["(EngineCore pid=4) ERROR " + CAUSE]
+
+
+def test_the_cause_block_keeps_plain_lines_that_continue_the_message(tmp_path):
+    block = block_of(tmp_path, [CAUSE, "Decrease the utilization or free memory.", "Then try again.", "a fourth line"])
+    assert block == [CAUSE, "Decrease the utilization or free memory.", "Then try again."]
+
+
+def test_a_cause_that_starts_a_traceback_shows_the_exception_that_ends_it(tmp_path):
+    block = block_of(tmp_path, ["Traceback (most recent call last):", '  File "/app/serve.py", line 9, in main',
+                                "    load_model(path)", '  File "/app/load.py", line 3, in load_model', "    raise KeyError(name)",
+                                "KeyError: 'model'"])
+    assert block == ["Traceback (most recent call last):", "KeyError: 'model'"]
+
+
+def test_a_traceback_without_an_ending_exception_shows_only_its_first_line(tmp_path):
+    log = tmp_path / "svc.log"
+    log.write_text("\n".join(["Traceback (most recent call last):", '  File "/app/serve.py", line 9, in main',
+                              *[f"plain line {i}" for i in range(40)]]) + "\n")
+    text = runner.failure_excerpt(log)
+    assert text.startswith("Cause found earlier in the log:\nTraceback (most recent call last):\n...\nLast log lines:")

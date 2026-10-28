@@ -81,6 +81,27 @@ CAUSE_LINES = 3
 _ERROR_LINE = re.compile(r"\bERROR\b|\b[\w.]*(?:Error|Exception)\b:|^Traceback \(most recent call last\)")
 
 
+_TRACE = re.compile(r'Traceback \(most recent call last\)|\bFile ".*", line \d+')
+_EXCEPTION = re.compile(r"\b[\w.]*(?:Error|Exception)\b:")
+
+
+def _cause_block(lines: list[str], cause: int) -> list[str]:
+    """The cause line, and what belongs to it: lines that continue its message, but not the traceback frames after it.
+
+    When the cause is the start of a traceback, the useful line is the exception that ends it, so show that one.
+    """
+    first = lines[cause]
+    if "Traceback (most recent call last)" in first:
+        ending = next((line for line in lines[cause + 1 : cause + 200] if _EXCEPTION.search(line) and not _TRACE.search(line)), None)
+        return [first] if ending is None else [first, ending]
+    block = [first]
+    for line in lines[cause + 1 : cause + CAUSE_LINES]:
+        if _TRACE.search(line):
+            break
+        block.append(line)
+    return block
+
+
 def _clip(line: str) -> str:
     return line if len(line) <= LINE_WIDTH else line[: LINE_WIDTH - 1] + "…"
 
@@ -113,7 +134,7 @@ def failure_excerpt(path: Path, tail: int = 20) -> str:
     text = "Last log lines:\n" + "\n".join(_clip(line) for line in shown)
     if cause is None or cause >= first_shown:
         return text
-    found = "\n".join(_clip(line) for line in lines[cause : cause + CAUSE_LINES])
+    found = "\n".join(_clip(line) for line in _cause_block(lines, cause))
     return f"Cause found earlier in the log:\n{found}\n...\n{text}"
 
 

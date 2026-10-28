@@ -4,6 +4,22 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- The two messages that refuse to start a service no longer suggest `--force` as a way out. They now say to free the
+  memory, or lower `gpu_memory_utilization`, and that `--force` only skips the check, so the service will probably
+  still fail at its own start-up check. The `mesh up --help` text for `--force` says the same.
+- `mesh --help` now describes `status` as a live view of every service (it still said "show running services"), and
+  `mesh logs --help` explains the `service` argument.
+- The "Cause found earlier in the log" block of a failed start-up no longer shows the traceback frames after the
+  cause. It shows the cause line and the lines that continue its message. When the cause starts a traceback, it shows
+  the exception that ends it.
+
+### Fixed
+- The plan said `1 services` and `1 GPUs` for a single service or a single GPU. It now says `1 service on 1 GPU`,
+  and the one-line summary reads `Plan: the service fits on 1 GPU.`
+
 ## [0.1.2] - 2026-10-28 (Latest)
 
 ### Added
