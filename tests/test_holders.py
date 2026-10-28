@@ -383,3 +383,13 @@ def test_a_slow_first_lookup_does_not_hold_up_the_first_frame(tmp_path):
     assert cache.get() is None  # not known yet: the caller shows something else for now
     release.set()
     wait_until(lambda: cache.get() == {"llm": [1]})
+
+
+def test_holders_still_show_a_process_whose_memory_nvidia_smi_cannot_report():
+    text = (FIXTURES / "compute_apps_running.csv").read_text().replace("555362, VLLM::Worker_TP0, 16252 MiB", "555362, VLLM::Worker_TP0, [N/A]")
+    gpus, _, services, proc, containers = rig()
+    compute = [GpuProcess(a.gpu_uuid, a.pid, a.process_name, a.used_mib) for a in parse_compute_apps(text)]
+    extra = holders.parse_xml_processes((FIXTURES / "nvidia_smi_processes.xml").read_text())
+    gpu0 = by_label(attribute(gpus, holders.merge_processes(compute, extra), services, proc, containers)[0])
+    assert gpu0["llm"].mib == 0 and "pid 555362" in gpu0["llm"].detail  # listed, with the memory it cannot say
+    assert gpu0["unattributed"].mib == 88 + 16252  # the memory nobody could account for shows up there instead

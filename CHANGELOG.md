@@ -31,6 +31,10 @@ All notable changes to this project are recorded here. The format follows
 - A file or folder problem, such as a `--log-dir` that cannot be created or a log that is not a file, ended in a long
   Python traceback. It is now one line, `error: Not a directory: /dev/null/nope`, with exit code 2. Piping
   `mesh logs NAME | head` also printed a `BrokenPipeError` traceback when `head` closed the pipe; it now ends quietly.
+- `mesh gpu` failed with `cannot read a memory value from '[N/A]'` and showed no table when `nvidia-smi` printed `[N/A]`
+  for a process's memory, which some systems (WSL2, some containers) do. The process is now listed with 0 MiB, and the
+  memory nobody can account for shows as unattributed. A process row with missing columns is a clear
+  `unexpected nvidia-smi row` error instead of a Python traceback.
 
 ## [0.1.3] - 2026-10-28 (Latest)
 

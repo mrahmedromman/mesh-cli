@@ -72,9 +72,12 @@ def parse_gpu_query(text: str) -> list[Gpu]:
 def parse_compute_apps(text: str) -> list[ComputeApp]:
     apps = []
     for row in _rows(text):
-        if not row[1].strip().isdigit():
-            continue  # header line
-        apps.append(ComputeApp(row[0], int(row[1]), row[2], _mib(row[3])))
+        if len(row) < 2 or not row[1].strip().isdigit():
+            continue  # the header, or a line that is not a process
+        if len(row) < 4:
+            raise GpuError(f"unexpected nvidia-smi row: {row}")
+        found = re.search(r"\d+", row[3])  # some systems (WSL2, some containers) print [N/A] for a process's memory
+        apps.append(ComputeApp(row[0], int(row[1]), row[2], int(found.group()) if found else 0))
     return apps
 
 

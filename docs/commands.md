@@ -116,6 +116,9 @@ Each holder is one of:
 - **unattributed**: memory in use that no listed process accounts for (driver overhead, or processes you are not
   allowed to see).
 
+On some systems (WSL2 and some containers) `nvidia-smi` prints `[N/A]` instead of a process's memory. The process is
+still listed, with 0 MiB, and the memory nobody can account for then shows under **unattributed**.
+
 It only reports; it never stops or signals anything.
 
 The same table is printed for you in three places, only for the GPUs involved:
