@@ -255,6 +255,9 @@ there, on your own computer:
   fresh, so a new run overwrites the previous log. Copy a log you want to keep.
 - `state.json`: which services are running, their process ids and ports. `mesh status`, `mesh down` and
   `mesh logs` read it. It is removed when the stack stops.
+- `mesh.lock`: held by `mesh up` while it runs, so that a second `mesh up` cannot start in the same folder. The
+  file stays in the folder and can be ignored; it is the system's lock on it, which goes away when `mesh up` ends,
+  not the file, that counts.
 
 `state.json` holds each service's full command, which can contain tokens, and logs can hold prompts and paths. So
 `mesh` creates the folder it uses readable only by you (mode `700`; folders above it keep the system default) and writes the files with mode `600`. A folder that

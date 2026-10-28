@@ -53,7 +53,11 @@ Behaviour on other GPUs, drivers and vLLM versions is not yet known. See
 1. Reads `nvidia-smi` and runs the plan. When everything fits it prints one summary line (the full plan with
    `--plan`, or when the plan has a warning or note). If a service will not fit it stops, unless `--force` is
    given. Without `nvidia-smi` it skips the plan and the memory numbers and says so.
-2. Refuses to start if a previous stack from this log directory is still running (run `mesh down` first).
+2. Refuses to start if a previous stack from this log directory is still running (run `mesh down` first), or if
+   another `mesh up` is still using it. Each `mesh up` locks the folder (`mesh.lock`) for as long as it runs, so two
+   that start at the same moment cannot both get through. The system drops the lock when `mesh up` ends, even if it
+   was killed, so a crash never leaves one behind. A filesystem that cannot lock (some network drives) skips the
+   lock; the check of the recorded `mesh up` still catches a second one that starts later.
 3. Refuses to start if another program is already listening on any service's port, and names the port.
 4. Right before each service starts, reads `nvidia-smi` again and checks that the memory free at that moment is
    enough for it. The plan in step 1 was made when `mesh up` began, and earlier services take a while to load, so

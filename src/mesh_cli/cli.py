@@ -205,6 +205,11 @@ def _cmd_up(args: argparse.Namespace) -> int:
     if alive:
         print(f"error: already running ({', '.join(alive)}). Stop them first with: mesh down", file=sys.stderr)
         return 1
+    state = runner.read_state(log_dir) or {}
+    if runner.controller_alive(state):  # still starting its first service, so nothing in the state has a process yet
+        print(f"error: another mesh up (pid {state['controller_pid']}) is already using {settings.tidy(log_dir)}. "
+              "Wait for it, or stop it with: mesh down", file=sys.stderr)
+        return 1
     try:
         gpus = read_gpus()
     except GpuError:

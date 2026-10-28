@@ -4,6 +4,18 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Two `mesh up` started at the same moment in the same folder were both allowed. Each one checked for a running stack
+  before either had written anything, so both started, and the state file then listed only one of the two stacks, so
+  `mesh down` and `mesh status` did not know about the other. On Linux one of them could also crash with
+  `FileNotFoundError: state.tmp`, because both wrote the state file through the same temporary file. `mesh up` now
+  locks the folder (`mesh.lock`) for as long as it runs and refuses to start when another one holds it, with the
+  process id in the message. The system drops the lock when `mesh up` ends, however it ends, so a crash leaves none
+  behind. Each process also writes its state file through a temporary file of its own. `mesh up` also refuses when
+  the `mesh up` recorded in the state file is still running, which covers filesystems that cannot lock.
+
 ## [0.1.3] - 2026-10-28 (Latest)
 
 ### Changed

@@ -1,3 +1,5 @@
+import json
+import subprocess
 import types
 from pathlib import Path
 
@@ -582,3 +584,40 @@ def test_the_help_texts_describe_force_and_status():
     up = words(commands["up"].format_help())
     assert "skip the memory checks" in up and "usually still fails" in up
     assert "name of a service in your config" in words(commands["logs"].format_help())
+
+
+# --- a second `mesh up` while one is still starting --------------------------------------------------------------------
+
+
+def state_with_controller(logs, pid, started):
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / "state.json").write_text(json.dumps({"controller_pid": pid, "controller_started": started, "services": {
+        "svc": {"status": "pending", "pid": None, "port": 8001, "health": "/"}}}))
+
+
+def test_up_refuses_while_another_mesh_up_is_still_starting(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    monkeypatch.setattr(cli_module.runner, "run_up", lambda *a, **k: pytest.fail("must not start anything"))
+    sleeper = subprocess.Popen(["sleep", "30"])  # stands for the other `mesh up`, which has no service with a process yet
+    try:
+        logs = tmp_path / "logs"
+        state_with_controller(logs, sleeper.pid, cli_module.runner.process_start(sleeper.pid))
+        cfg = write_cfg(tmp_path, "services:\n" + TIGHT)
+        assert main(["up", cfg, "--log-dir", str(logs)]) == 1
+        err = capsys.readouterr().err
+        assert "another mesh up" in err and f"pid {sleeper.pid}" in err and "mesh down" in err
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+
+
+def test_up_goes_ahead_when_the_recorded_mesh_up_is_gone(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    started = []
+    monkeypatch.setattr(cli_module.runner, "run_up", lambda config, log_dir, **k: started.append(log_dir))
+    gone = subprocess.Popen(["true"])
+    gone.wait()
+    logs = tmp_path / "logs"
+    state_with_controller(logs, gone.pid, "an earlier boot:1")
+    cfg = write_cfg(tmp_path, "services:\n" + TIGHT)
+    assert main(["up", cfg, "--log-dir", str(logs)]) == 0 and started == [logs]

@@ -1,5 +1,6 @@
 """Runner tests use throwaway http.server processes instead of real models."""
 
+import errno
 import os
 import signal
 import socket
@@ -1254,3 +1255,95 @@ def test_a_traceback_without_an_ending_exception_shows_only_its_first_line(tmp_p
                               *[f"plain line {i}" for i in range(40)]]) + "\n")
     text = runner.failure_excerpt(log)
     assert text.startswith("Cause found earlier in the log:\nTraceback (most recent call last):\n...\nLast log lines:")
+
+
+# --- one `mesh up` per state folder -----------------------------------------------------------------------------------
+
+
+def test_a_second_run_up_in_the_same_folder_is_refused_and_leaves_the_first_alone(tmp_path):
+    logs = tmp_path / "logs"
+    release = threading.Event()
+    first = threading.Thread(
+        target=runner.run_up, args=(Config(services=[http_service("a", free_port(), tmp_path)]), logs),
+        kwargs={"hold": lambda: not release.is_set(), "out": lambda _: None, "health_interval": 0.2, "grace": 5},
+    )
+    first.start()
+    try:
+        wait_for(lambda: ((runner.read_state(logs) or {}).get("services", {}).get("a") or {}).get("status") == "running", timeout=20)
+        other = Config(services=[http_service("b", free_port(), tmp_path)])
+        with pytest.raises(runner.RunError, match="another mesh up is already using this folder"):
+            runner.run_up(other, logs, hold=lambda: False, out=lambda _: None, health_interval=0.2, grace=5)
+        assert list(runner.read_state(logs)["services"]) == ["a"]  # the refused one wrote nothing
+        assert not runner.log_path(logs, "b").exists()
+    finally:
+        release.set()
+        first.join(60)
+
+
+def test_the_folder_can_be_used_again_once_mesh_up_has_finished(tmp_path):
+    logs = tmp_path / "logs"
+    for name in ("a", "b"):
+        runner.run_up(Config(services=[http_service(name, free_port(), tmp_path)]), logs, hold=lambda: False,
+                      out=lambda _: None, health_interval=0.2, grace=5)
+
+
+def test_the_lock_is_free_again_when_the_holder_dies_without_cleaning_up(tmp_path):
+    code = "import sys, time; from pathlib import Path; from mesh_cli import runner; runner.take_lock(Path(sys.argv[1])); print('ready', flush=True); time.sleep(60)"
+    holder = subprocess.Popen([sys.executable, "-c", code, str(tmp_path)], stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "ready"
+        with pytest.raises(runner.RunError, match=f"pid {holder.pid}"):
+            runner.take_lock(tmp_path)
+        holder.kill()  # no cleanup at all, like kill -9
+        holder.wait()
+        fd = runner.take_lock(tmp_path)
+        assert fd is not None
+        os.close(fd)
+    finally:
+        holder.kill()
+
+
+def test_a_filesystem_that_cannot_lock_does_not_stop_mesh_up(tmp_path, monkeypatch):
+    def cannot(fd, operation):
+        raise OSError(errno.ENOLCK, "no locks available")
+
+    monkeypatch.setattr(runner.fcntl, "flock", cannot)
+    assert runner.take_lock(tmp_path) is None
+    runner.run_up(Config(services=[http_service("a", free_port(), tmp_path)]), tmp_path / "logs", hold=lambda: False,
+                  out=lambda _: None, health_interval=0.2, grace=5)
+
+
+def test_each_process_writes_the_state_file_through_a_temporary_file_of_its_own(tmp_path, monkeypatch):
+    sources = []
+    real = os.replace
+    with monkeypatch.context() as patched:
+        patched.setattr(runner.os, "replace", lambda source, target: (sources.append(Path(source).name), real(source, target))[1])
+        for pid in (111, 222):
+            patched.setattr(runner.os, "getpid", lambda pid=pid: pid)
+            runner.write_state(tmp_path, {"services": {}})
+    assert sources[0] != sources[1] and "111" in sources[0] and "222" in sources[1]
+    assert [p.name for p in tmp_path.iterdir()] == ["state.json"]  # nothing is left behind
+
+
+def test_a_state_write_that_fails_leaves_no_temporary_file(tmp_path, monkeypatch):
+    def broken(source, target):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(runner.os, "replace", broken)
+    with pytest.raises(OSError):
+        runner.write_state(tmp_path, {"services": {}})
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_live_controller_is_found_in_the_state_and_a_dead_or_recycled_one_is_not():
+    sleeper = subprocess.Popen(["sleep", "30"])
+    try:
+        stamp = runner.process_start(sleeper.pid)
+        assert runner.controller_alive({"controller_pid": sleeper.pid, "controller_started": stamp})
+        assert not runner.controller_alive({"controller_pid": sleeper.pid, "controller_started": "another boot:1"})
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+    assert not runner.controller_alive({"controller_pid": sleeper.pid, "controller_started": stamp})
+    assert not runner.controller_alive({"controller_pid": os.getpid()})  # ourselves do not count
+    assert not runner.controller_alive({}) and not runner.controller_alive(None)

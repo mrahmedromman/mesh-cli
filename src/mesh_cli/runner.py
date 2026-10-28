@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import functools
 import http.client
 import json
@@ -24,6 +25,7 @@ from .config import Config, Service
 from .settings import tidy
 
 STATE_FILE = "state.json"
+LOCK_FILE = "mesh.lock"
 
 
 MIN_ADDED_MIB = 100  # a model on a GPU takes more than the CUDA context alone, which is already a few hundred MiB
@@ -255,12 +257,46 @@ def read_state(log_dir: Path) -> dict | None:
 
 def write_state(log_dir: Path, state: dict) -> None:
     target = Path(log_dir) / STATE_FILE
-    tmp = target.with_suffix(".tmp")
-    # The file holds each service's full command, which may contain tokens, so only the user may read it.
-    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
-        os.fchmod(handle.fileno(), 0o600)  # a temporary file left by an older version may have looser permissions
-        handle.write(json.dumps(state, indent=2))
-    os.replace(tmp, target)
+    tmp = target.with_name(f"{STATE_FILE}.{os.getpid()}.tmp")  # one per process: two `mesh up` must never share it
+    try:
+        # The file holds each service's full command, which may contain tokens, so only the user may read it.
+        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            handle.write(json.dumps(state, indent=2))
+        os.replace(tmp, target)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def take_lock(log_dir: Path) -> int | None:
+    """Lock the state folder for the life of this `mesh up`, so that a second one cannot start in it at the same time.
+
+    Returns the open file to keep: closing it unlocks. The system drops the lock when the process ends, however it
+    ends, so a crash never leaves one behind. Returns None when the filesystem cannot lock (some network drives);
+    `mesh up` then relies on the check of the recorded `mesh up` instead.
+    """
+    fd = os.open(Path(log_dir) / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        holder = os.read(fd, 32).decode(errors="replace").strip()
+        os.close(fd)
+        who = f" (pid {holder})" if holder.isdigit() else ""
+        raise RunError(f"another mesh up is already using this folder{who}. Wait for it, or stop it with: mesh down") from None
+    except OSError:
+        os.close(fd)
+        return None
+    os.ftruncate(fd, 0)
+    os.write(fd, f"{os.getpid()}\n".encode())
+    return fd
+
+
+def controller_alive(state: dict | None) -> bool:
+    """True if the `mesh up` recorded in the state file is still running: another process, and the one that wrote it."""
+    state = state or {}
+    pid = state.get("controller_pid") or 0
+    return pid not in (0, os.getpid()) and pid_alive(pid) and is_ours(pid, state.get("controller_started"))
 
 
 def mark(log_dir: Path, state: dict, name: str, **fields) -> None:
@@ -548,6 +584,7 @@ def run_up(
         raise RunError("; ".join(taken) + ". Stop it, or change the port in the config.")
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)  # private if mesh creates it; an existing folder is left alone
+    lock = take_lock(log_dir)  # a second `mesh up` in this folder stops here; it is released when this one has stopped
 
     started: list[tuple[Service, subprocess.Popen]] = []
     state: dict = {
@@ -642,6 +679,8 @@ def run_up(
                 signal.signal(sig, handler)
             if previous_handler is not None:
                 signal.signal(signal.SIGTERM, previous_handler)
+            if lock is not None:
+                os.close(lock)
 
 
 def mesh_up_wait(wait: float | None, graces: list[float]) -> float:
@@ -670,14 +709,12 @@ def stop_from_state(
         return False
     services = [(name, info) for name, info in state.get("services", {}).items() if info.get("pid")]  # in start order
     controller = state.get("controller_pid") or 0
-    controller_alive = (
-        controller not in (0, os.getpid()) and pid_alive(controller) and is_ours(controller, state.get("controller_started"))
-    )
-    if not services and not controller_alive:  # nothing was ever started, so there is nothing to stop
+    running = controller_alive(state)
+    if not services and not running:  # nothing was ever started, so there is nothing to stop
         clear_state(log_dir)
         return False
     graces = {name: float(grace if grace is not None else info.get("stop_timeout_s", 30)) for name, info in services}
-    if controller_alive:
+    if running:
         out(f"Asking mesh up (pid {controller}) to stop {_count(len(services))}...")
         try:
             os.kill(controller, signal.SIGTERM)  # let `mesh up` shut down gracefully and clear the state
