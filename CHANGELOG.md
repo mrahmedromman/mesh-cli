@@ -4,7 +4,7 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.3] - 2026-10-28 (Latest)
 
 ### Changed
 - The two messages that refuse to start a service no longer suggest `--force` as a way out. They now say to free the
@@ -20,7 +20,7 @@ All notable changes to this project are recorded here. The format follows
 - The plan said `1 services` and `1 GPUs` for a single service or a single GPU. It now says `1 service on 1 GPU`,
   and the one-line summary reads `Plan: the service fits on 1 GPU.`
 
-## [0.1.2] - 2026-10-28 (Latest)
+## [0.1.2] - 2026-10-28
 
 ### Added
 - `mesh up` now checks the GPU memory again right before each service starts. The plan is made once, when `mesh up`
