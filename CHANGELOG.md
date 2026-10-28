@@ -13,6 +13,12 @@ All notable changes to this project are recorded here. The format follows
   already started, and shows how much is missing and who holds the memory. `--force` skips the check. Without
   `nvidia-smi` there is nothing to check against and it is skipped.
 
+### Changed
+- The error for a service that exited at start-up now shows its likely cause first when that is further up the log
+  than the last 20 lines (the first line that mentions running out of GPU memory, else the first error line, with
+  the lines after it). A vLLM log ends with "See root cause above" and the cause is far above it, so it was not
+  visible. The first line of the message no longer ends with "Last log lines:".
+
 ### Fixed
 - When a service exited at start-up, `mesh up` looked for a memory error only in the last 20 log lines. vLLM prints
   the real cause (`Free memory on device ...`) far above the traceback that ends the log, so the table of who holds

@@ -1147,3 +1147,74 @@ def test_a_service_that_exits_carries_its_log_file(tmp_path):
     with pytest.raises(runner.ServiceExited) as caught:
         runner.wait_healthy(svc, proc, log, interval=0.1)
     assert caught.value.log_file == log
+
+
+# --- the error shown for a service that exited includes the cause, even when it is far above the end of the log --------
+
+
+CAUSE = "ValueError: Free memory on device cuda:0 (3/23 GiB) on startup is less than desired GPU memory utilization"
+
+
+def test_excerpt_adds_the_cause_found_above_the_last_lines(tmp_path):
+    log = tmp_path / "svc.log"
+    log.write_text(vllm_style_log(CAUSE))
+    text = runner.failure_excerpt(log)
+    assert text.index(CAUSE) < text.index("Last log lines:")
+    assert text.endswith("RuntimeError: Engine core initialization failed. See root cause above.")
+    assert "Cause found earlier in the log" in text
+
+
+def test_excerpt_shows_only_the_last_lines_when_the_cause_is_among_them(tmp_path):
+    log = tmp_path / "svc.log"
+    log.write_text("\n".join(["INFO starting", *[f"line {i}" for i in range(50)], CAUSE]) + "\n")
+    text = runner.failure_excerpt(log)
+    assert "Cause found earlier" not in text and text.count(CAUSE) == 1 and text.startswith("Last log lines:")
+
+
+def test_excerpt_uses_the_first_error_line_when_there_is_no_memory_error(tmp_path):
+    log = tmp_path / "svc.log"
+    log.write_text(vllm_style_log("ERROR 10-28 [core.py:1] EngineCore failed to start"))
+    text = runner.failure_excerpt(log)
+    assert text.index("EngineCore failed to start") < text.index("Last log lines:")
+
+
+def test_excerpt_prefers_a_memory_error_over_an_earlier_unrelated_error(tmp_path):
+    log = tmp_path / "svc.log"
+    log.write_text("\n".join(["ERROR something harmless was retried", CAUSE,
+                              *[f"traceback {i}" for i in range(40)], "RuntimeError: failed"]) + "\n")
+    text = runner.failure_excerpt(log)
+    assert text.splitlines()[1] == CAUSE
+
+
+def test_excerpt_has_only_the_last_lines_when_nothing_looks_like_an_error(tmp_path):
+    log = tmp_path / "svc.log"
+    log.write_text("\n".join(f"just a line {i}" for i in range(100)) + "\n")
+    text = runner.failure_excerpt(log)
+    assert text.startswith("Last log lines:\njust a line 80") and text.endswith("just a line 99")
+
+
+def test_excerpt_cuts_very_long_lines(tmp_path):
+    log = tmp_path / "svc.log"
+    log.write_text("\n".join([CAUSE + " " + "x" * 5000, *[f"line {i}" for i in range(40)]]) + "\n")
+    cause = runner.failure_excerpt(log).splitlines()[1]
+    assert len(cause) <= runner.LINE_WIDTH and cause.endswith("…")
+
+
+def test_excerpt_of_a_missing_or_empty_log_does_not_fail(tmp_path):
+    assert runner.failure_excerpt(tmp_path / "nothing.log") == "Last log lines:\n"
+    empty = tmp_path / "empty.log"
+    empty.write_text("")
+    assert runner.failure_excerpt(empty) == "Last log lines:\n"
+
+
+def test_a_service_that_exits_reports_the_cause_and_a_clean_first_line(tmp_path):
+    svc = Service(name="a", port=free_port(), gpus=[0], health="/", start_timeout_s=30, command="exit 1")
+    log = tmp_path / "a.log"
+    log.write_text(vllm_style_log(CAUSE))
+    proc = subprocess.Popen(["bash", "-c", "exit 1"])
+    proc.wait()
+    with pytest.raises(runner.ServiceExited) as caught:
+        runner.wait_healthy(svc, proc, log, interval=0.1)
+    message = str(caught.value)
+    assert message.splitlines()[0] == "a exited with status 1 before it became healthy."
+    assert CAUSE in message and "Last log lines:" in message

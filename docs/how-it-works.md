@@ -63,8 +63,9 @@ Behaviour on other GPUs, drivers and vLLM versions is not yet known. See
 5. After starting a service it polls the `health` path until it answers with a status below 500 (a `503` while a
    model loads means "not ready yet"), or the service exits, or `start_timeout_s` passes.
 6. When a service is healthy it prints how much GPU memory it added.
-7. If a service exits or times out before it is healthy, it prints that service's last 20 log lines, stops every
-   service already started, and exits with code 1.
+7. If a service exits or times out before it is healthy, it prints that service's last 20 log lines. When the likely
+   cause is further up the log (vLLM prints `Free memory on device ...` far above the traceback that ends it), those
+   few lines are shown first. Then it stops every service already started and exits with code 1.
 8. When all are up it waits. If a service dies later, it prints a warning with the log path, stops what is left
    of its process group, and leaves the others running; it does not restart it.
 9. On Ctrl+C, SIGTERM, or `mesh down`, it stops services in reverse order: first the service's `stop` command if

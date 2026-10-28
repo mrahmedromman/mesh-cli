@@ -73,14 +73,48 @@ def log_has_memory_error(path: Path) -> bool:
 
     vLLM prints the real cause above a long traceback, so the last lines of a log often do not show it.
     """
+    return any(marker in line.lower() for line in _log_lines(path) for marker in MEMORY_ERRORS)
+
+
+LINE_WIDTH = 300  # a longer line of a log excerpt is cut
+CAUSE_LINES = 3
+_ERROR_LINE = re.compile(r"\bERROR\b|\b[\w.]*(?:Error|Exception)\b:|^Traceback \(most recent call last\)")
+
+
+def _clip(line: str) -> str:
+    return line if len(line) <= LINE_WIDTH else line[: LINE_WIDTH - 1] + "…"
+
+
+def _log_lines(path: Path) -> list[str]:
+    """The lines of the end of a log (the last LOG_SCAN_BYTES), or none if it cannot be read."""
     try:
         with open(path, "rb") as handle:
             handle.seek(0, 2)
-            handle.seek(max(handle.tell() - LOG_SCAN_BYTES, 0))
-            text = handle.read().decode(errors="replace").lower()
+            start = max(handle.tell() - LOG_SCAN_BYTES, 0)
+            handle.seek(start)
+            lines = handle.read().decode(errors="replace").splitlines()
     except OSError:
-        return False
-    return any(marker in text for marker in MEMORY_ERRORS)
+        return []
+    return lines[1:] if start else lines  # the first line of a cut log is only a piece of a line
+
+
+def failure_excerpt(path: Path, tail: int = 20) -> str:
+    """What to show for a service that exited: its last lines, and the likely cause when that is further up.
+
+    A server such as vLLM prints the real cause (`Free memory on device ...`) once, far above the long traceback that
+    ends the log, so the last lines alone say "see root cause above". The cause is the first line that mentions
+    running out of GPU memory, else the first line that looks like an error.
+    """
+    lines = _log_lines(path)
+    shown = lines[-tail:] if tail else []
+    first_shown = len(lines) - len(shown)
+    memory = next((i for i, line in enumerate(lines) if any(m in line.lower() for m in MEMORY_ERRORS)), None)
+    cause = memory if memory is not None else next((i for i, line in enumerate(lines) if _ERROR_LINE.search(line)), None)
+    text = "Last log lines:\n" + "\n".join(_clip(line) for line in shown)
+    if cause is None or cause >= first_shown:
+        return text
+    found = "\n".join(_clip(line) for line in lines[cause : cause + CAUSE_LINES])
+    return f"Cause found earlier in the log:\n{found}\n...\n{text}"
 
 
 def last_line(path: Path, size: int = 4096) -> str:
@@ -341,8 +375,7 @@ def wait_healthy(
         code = proc.poll()
         if code is not None:
             raise ServiceExited(
-                f"{svc.name} exited with status {code} before it became healthy. Last log lines:\n"
-                + tail_lines(log_file, 20),
+                f"{svc.name} exited with status {code} before it became healthy.\n" + failure_excerpt(log_file),
                 log_file,
             )
         answer = probe_fn(svc.port, svc.health)
