@@ -1098,3 +1098,52 @@ def test_a_failed_recheck_is_recorded_as_the_reason_while_the_stack_stops(tmp_pa
         runner.clear_state = original
     assert states[0]["services"]["a"]["status"] == "failed"
     assert states[0]["services"]["a"]["error"].startswith("a would not fit right now")
+
+
+# --- a memory error anywhere in the log is found, not only in its last lines -----------------------------------------
+
+
+def vllm_style_log(cause: str, lines_after: int = 60) -> str:
+    """A start-up log where the real cause is far above the traceback that ends it."""
+    return "\n".join(
+        ["INFO starting", cause, *[f"(APIServer pid=1) traceback line {i}" for i in range(lines_after)],
+         "RuntimeError: Engine core initialization failed. See root cause above."]
+    ) + "\n"
+
+
+def test_a_memory_error_far_above_the_last_lines_is_found(tmp_path):
+    log = tmp_path / "svc.log"
+    log.write_text(vllm_style_log("ValueError: Free memory on device cuda:0 (3/23 GiB) on startup is less than desired"))
+    assert runner.log_has_memory_error(log)
+
+
+def test_a_log_without_a_memory_error_is_not_one(tmp_path):
+    log = tmp_path / "svc.log"
+    log.write_text(vllm_style_log("KeyError: 'model'"))
+    assert not runner.log_has_memory_error(log)
+
+
+def test_the_memory_markers_are_matched_in_any_case(tmp_path):
+    log = tmp_path / "svc.log"
+    log.write_text("torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2 GiB\n")
+    assert runner.log_has_memory_error(log)
+
+
+def test_a_missing_log_has_no_memory_error(tmp_path):
+    assert not runner.log_has_memory_error(tmp_path / "nothing.log")
+
+
+def test_only_the_end_of_a_huge_log_is_read(tmp_path):
+    log = tmp_path / "svc.log"
+    log.write_text("Free memory on device\n" + "x" * (runner.LOG_SCAN_BYTES + 10) + "\n")
+    assert not runner.log_has_memory_error(log)  # the marker is older than what is scanned
+
+
+def test_a_service_that_exits_carries_its_log_file(tmp_path):
+    svc = Service(name="a", port=free_port(), gpus=[0], health="/", start_timeout_s=30, command="exit 3")
+    log = tmp_path / "a.log"
+    proc = subprocess.Popen(["bash", "-c", "exit 3"])
+    proc.wait()
+    with pytest.raises(runner.ServiceExited) as caught:
+        runner.wait_healthy(svc, proc, log, interval=0.1)
+    assert caught.value.log_file == log

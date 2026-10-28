@@ -35,7 +35,9 @@ class RunError(Exception):
 
 
 class ServiceExited(RunError):
-    pass
+    def __init__(self, message: str, log_file: Path | None = None) -> None:
+        super().__init__(message)
+        self.log_file = log_file  # the service's log, which holds more than the few lines in the message
 
 
 class StartTimeout(RunError):
@@ -60,6 +62,25 @@ def tail_lines(path: Path, count: int) -> str:
             return "".join(deque(handle, maxlen=count))
     except OSError:
         return ""
+
+
+LOG_SCAN_BYTES = 4 * 1024 * 1024  # how much of the end of a log is searched for a cause
+MEMORY_ERRORS = ("free memory on device", "out of memory", "outofmemoryerror")
+
+
+def log_has_memory_error(path: Path) -> bool:
+    """Whether the service's log (its last few MiB) mentions running out of GPU memory, wherever in it.
+
+    vLLM prints the real cause above a long traceback, so the last lines of a log often do not show it.
+    """
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, 2)
+            handle.seek(max(handle.tell() - LOG_SCAN_BYTES, 0))
+            text = handle.read().decode(errors="replace").lower()
+    except OSError:
+        return False
+    return any(marker in text for marker in MEMORY_ERRORS)
 
 
 def last_line(path: Path, size: int = 4096) -> str:
@@ -321,7 +342,8 @@ def wait_healthy(
         if code is not None:
             raise ServiceExited(
                 f"{svc.name} exited with status {code} before it became healthy. Last log lines:\n"
-                + tail_lines(log_file, 20)
+                + tail_lines(log_file, 20),
+                log_file,
             )
         answer = probe_fn(svc.port, svc.health)
         if is_up(answer):

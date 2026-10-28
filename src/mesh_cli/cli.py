@@ -128,12 +128,12 @@ def _budgets(gpus, external: dict[int, int] | None) -> list[GpuBudget]:
     ]
 
 
-MEMORY_ERRORS = ("free memory on device", "out of memory", "outofmemoryerror")
-
-
-def _looks_like_memory_error(text: str) -> bool:
-    lowered = text.lower()
-    return any(marker in lowered for marker in MEMORY_ERRORS)
+def _looks_like_memory_error(exc: runner.ServiceExited) -> bool:
+    """Whether a service exited for lack of GPU memory: the message shows only the last lines, the log shows it all."""
+    lowered = str(exc).lower()
+    return any(marker in lowered for marker in runner.MEMORY_ERRORS) or (
+        exc.log_file is not None and runner.log_has_memory_error(exc.log_file)
+    )
 
 
 def _show_holders(log_dir: Path, title: str, only: set[int] | None = None) -> None:
@@ -232,7 +232,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         if isinstance(exc, runner.NotEnoughMemory):
             _show_holders(log_dir, "Who is holding memory on the GPUs that are short:", exc.gpus)
-        elif isinstance(exc, runner.ServiceExited) and _looks_like_memory_error(str(exc)):
+        elif isinstance(exc, runner.ServiceExited) and _looks_like_memory_error(exc):
             _show_holders(log_dir, "Who is holding GPU memory now (the services mesh started have been stopped):")
         return 1
     finally:

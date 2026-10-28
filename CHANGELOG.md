@@ -13,6 +13,11 @@ All notable changes to this project are recorded here. The format follows
   already started, and shows how much is missing and who holds the memory. `--force` skips the check. Without
   `nvidia-smi` there is nothing to check against and it is skipped.
 
+### Fixed
+- When a service exited at start-up, `mesh up` looked for a memory error only in the last 20 log lines. vLLM prints
+  the real cause (`Free memory on device ...`) far above the traceback that ends the log, so the table of who holds
+  the GPU memory was often not shown. It now searches the end of the whole log (the last 4 MiB).
+
 ## [0.1.1] - 2026-10-27 (Latest)
 
 ### Changed

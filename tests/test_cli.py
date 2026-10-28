@@ -510,3 +510,22 @@ def test_up_reports_a_refused_service_and_shows_who_holds_the_memory(tmp_path, m
     assert "svc would not fit right now" in captured.err
     assert "Who is holding memory on the GPUs that are short" in captured.out
     assert shown == [{0}]
+
+
+def test_up_shows_holders_when_the_memory_error_is_far_above_the_end_of_the_log(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    calls = []
+    monkeypatch.setattr(holders, "gather", lambda log_dir, only=None, proc=None: calls.append(only) or fake_report())
+    log = tmp_path / "svc.log"
+    log.write_text("ValueError: Free memory on device cuda:0 (3/23 GiB) on startup is less than desired\n"
+                   + "".join(f"(APIServer pid=1) traceback line {i}\n" for i in range(60))
+                   + "RuntimeError: Engine core initialization failed. See root cause above.\n")
+
+    def failing_up(*args, **kwargs):  # the 20 lines in the message do not show the cause, the log file does
+        raise cli_module.runner.ServiceExited("svc exited with status 1 before it became healthy.\nRuntimeError: Engine core initialization failed", log_file=log)
+
+    monkeypatch.setattr(cli_module.runner, "run_up", failing_up)
+    cfg = write_cfg(tmp_path, "services:\n  - {name: svc, port: 8001, gpus: [0], gpu_memory_utilization: 0.1, command: 'true'}\n")
+    assert main(["up", cfg, "--log-dir", str(tmp_path / "logs")]) == 1
+    assert "Who is holding GPU memory now" in capsys.readouterr().out
+    assert calls == [None]

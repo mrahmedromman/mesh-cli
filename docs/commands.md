@@ -120,7 +120,8 @@ It only reports; it never stops or signals anything.
 The same table is printed for you in three places, only for the GPUs involved:
 
 - when `mesh up` finds the plan does not fit (the GPUs that are short);
-- when a service exits during `mesh up` with a memory error in its log;
+- when a service exits during `mesh up` and its log mentions running out of GPU memory, anywhere in the last few MiB of
+  the log (the real cause is often far above the traceback that ends it);
 - under `mesh plan`, when it counts memory already in use as external (not with `--gpus-csv`).
 
 Run it on the host, not inside a container: inside a container `nvidia-smi` cannot see the host's GPU processes.
