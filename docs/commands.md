@@ -151,6 +151,11 @@ exits, so it never waits for a key. With no stack running it prints `nothing run
 `mesh down`, run from another terminal, asks the `mesh up` process to shut down gracefully, so the result is the
 same as pressing Ctrl+C there. If that process is gone, it stops each recorded service itself.
 
+If a service could not be stopped (for example a process that belongs to another user, which you may not signal), `mesh down`
+says so, exits with code 1, and keeps the record of that service. `mesh status` still shows it (as `stopping`), the
+next `mesh up` refuses to start on top of it, and running `mesh down` again tries once more. The same holds when
+`mesh up` itself ends after Ctrl+C with a service it could not stop: it exits with code 1 and keeps the record.
+
 The state file records when each process began, next to its process id. After a crash or a reboot the same id may
 belong to another program; `mesh` then ignores it: `mesh up` is not refused because of it, and `mesh down` does
 not signal it (it still runs the service's `stop` command, such as `docker stop NAME`). A service that is really
@@ -241,7 +246,7 @@ modes.
 | Code | Meaning |
 |---|---|
 | 0 | Success. |
-| 1 | `plan`: a service will not fit. `up`: the plan does not fit (without `--force`), the memory ran short before a service started, a service failed to start, or a stack is already running. `logs`: no such log file. |
+| 1 | `plan`: a service will not fit. `up`: the plan does not fit (without `--force`), the memory ran short before a service started, a service failed to start, a stack is already running, or a service could not be stopped when it ended. `down`: a service could not be stopped. `logs`: no such log file. |
 | 2 | Bad config, unreadable `nvidia-smi` output, or a bad command line. |
 
 ## Where files go

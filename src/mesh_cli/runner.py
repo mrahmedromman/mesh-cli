@@ -510,14 +510,14 @@ def stop_all(
     grace: float,
     out: Callable[[str], None],
     graces: dict[str, float] | None = None,
-) -> int:
-    """Stop services in the order given, printing progress. Returns how many are still running afterwards.
+) -> list[str]:
+    """Stop services in the order given, printing progress. Returns the names of those still running afterwards.
 
     `grace` is how long each service gets to stop before it is killed; `graces` gives some services their own.
     """
     total = len(entries)
     out(f"Stopping {_count(total)}...")
-    stuck = 0
+    stuck: list[str] = []
     for name, pid, stop_command, proc in entries:
         out(f"  stopping {name} ...")
         began = time.monotonic()
@@ -533,12 +533,25 @@ def stop_all(
         else:
             out(f"  stopped {name}" + (f" ({seconds:.0f}s)" if seconds >= 1 else ""))
         if result == "denied":
-            stuck += 1
+            stuck.append(name)
         elif pid and group_alive(pid):
-            stuck += 1
+            stuck.append(name)
             out(f"  warning: {name} is still running (pid {pid})")
-    out(f"{stuck} of {_count(total)} could not be stopped." if stuck else _all_stopped(total))
+    out(f"{len(stuck)} of {_count(total)} could not be stopped." if stuck else _all_stopped(total))
     return stuck
+
+
+def keep_running(log_dir: Path, state: dict, names: list[str]) -> None:
+    """After a stop that left services running, keep their records and drop the rest.
+
+    `mesh status` then still shows them, the next `mesh up` refuses to start on top of them, and `mesh down` can try again.
+    """
+    kept = {name: {**info, "status": "stopping", "error": "could not be stopped"}
+            for name, info in state.get("services", {}).items() if name in names}
+    try:
+        write_state(log_dir, {"controller_pid": 0, "services": kept})
+    except OSError:
+        pass  # a full disk must not turn a clean-up into a crash
 
 
 def _on_sigterm(signum, frame):  # noqa: ARG001
@@ -568,8 +581,10 @@ def run_up(
     grace: float | None = None,
     progress: Callable[[str | None, float, str], None] | None = None,
     recheck: Callable[[Service], None] | None = None,
-) -> None:
+) -> int:
     """Start every service in order. Blocks (while `hold()` is true, default forever), then stops everything.
+
+    Returns how many services could not be stopped at the end (0 if all stopped); their records are kept in the state file.
 
     `recheck(service)` is called right before each service starts. It raises NotEnoughMemory when the memory that is
     free at that moment is too little (something else took it after the plan was made); the start is then
@@ -604,6 +619,7 @@ def run_up(
     previous_handler = None
     if threading.current_thread() is threading.main_thread():
         previous_handler = signal.signal(signal.SIGTERM, _on_sigterm)
+    still_running: list[str] = []
     total = len(config.services)
     try:
         write_state(log_dir, state)
@@ -675,9 +691,13 @@ def run_up(
             except OSError:
                 pass  # a full disk must not stop the cleanup below
             if started:
-                stop_all([(svc.name, proc.pid, svc.stop, proc) for svc, proc in reversed(started)], 30.0 if grace is None else grace, out,
-                         None if grace is not None else {svc.name: svc.stop_timeout_s for svc, _ in started})
-            clear_state(log_dir)
+                still_running = stop_all([(svc.name, proc.pid, svc.stop, proc) for svc, proc in reversed(started)],
+                                         30.0 if grace is None else grace, out,
+                                         None if grace is not None else {svc.name: svc.stop_timeout_s for svc, _ in started})
+            if still_running:
+                keep_running(log_dir, state, still_running)
+            else:
+                clear_state(log_dir)
         finally:
             for sig, handler in restore:
                 signal.signal(sig, handler)
@@ -685,6 +705,7 @@ def run_up(
                 signal.signal(signal.SIGTERM, previous_handler)
             if lock is not None:
                 os.close(lock)
+    return len(still_running)
 
 
 def mesh_up_wait(wait: float | None, graces: list[float]) -> float:
@@ -702,21 +723,24 @@ def stop_from_state(
     wait: float | None = None,
     poll: float = 0.5,
     grace: float | None = None,
-) -> bool:
-    """`mesh down`: stop a stack started by another `mesh up` process. Returns False if nothing was running.
+) -> int | None:
+    """`mesh down`: stop a stack started by another `mesh up` process.
+
+    Returns None if nothing was running, else how many services are still running afterwards (0: all stopped). The
+    records of services that could not be stopped are kept, see `keep_running`.
 
     Each service gets the `stop_timeout_s` recorded in the state file (30 seconds for a file from an older version);
     `grace`, if given, replaces that for every service.
     """
     state = read_state(log_dir)
     if not state:
-        return False
+        return None
     services = [(name, info) for name, info in state.get("services", {}).items() if info.get("pid")]  # in start order
     controller = state.get("controller_pid") or 0
     running = controller_alive(state)
     if not services and not running:  # nothing was ever started, so there is nothing to stop
         clear_state(log_dir)
-        return False
+        return None
     graces = {name: float(grace if grace is not None else info.get("stop_timeout_s", 30)) for name, info in services}
     if running:
         out(f"Asking mesh up (pid {controller}) to stop {_count(len(services))}...")
@@ -728,20 +752,28 @@ def stop_from_state(
             remaining = [name for name, _ in reversed(services)]
             pids = {name: info["pid"] for name, info in services}
             deadline = time.monotonic() + mesh_up_wait(wait, list(graces.values()))
+            ended = False
             while time.monotonic() < deadline:
-                finished = read_state(log_dir) is None
+                current = read_state(log_dir)
                 for name in list(remaining):  # report each service as it disappears (they stop in reverse order)
-                    if finished or not group_alive(pids[name]):
+                    if current is None or not group_alive(pids[name]):
                         out(f"  stopped {name}")
                         remaining.remove(name)
-                if finished:
+                if current is None:  # `mesh up` finished its clean-up and removed the state: everything is stopped
                     out(_all_stopped(len(services)))
-                    return True
+                    return 0
+                if not controller_alive(current):  # it has ended without finishing: do the rest here
+                    ended = True
+                    break
                 time.sleep(poll)
-            out("mesh up did not finish in time; stopping the remaining services directly.")
+            out("mesh up has ended; stopping what it left running directly." if ended
+                else "mesh up did not finish in time; stopping the remaining services directly.")
             services = [(name, info) for name, info in services if name in remaining]
     # A pid that now belongs to another program is passed as 0, so only its stop command (e.g. `docker stop NAME`) runs.
-    stop_all([(name, info["pid"] if is_ours(info["pid"], info.get("started")) else 0, info.get("stop"), None)
-              for name, info in reversed(services)], 30.0, out, graces)
-    clear_state(log_dir)
-    return True
+    left = stop_all([(name, info["pid"] if is_ours(info["pid"], info.get("started")) else 0, info.get("stop"), None)
+                     for name, info in reversed(services)], 30.0, out, graces)
+    if left:
+        keep_running(log_dir, state, left)
+    else:
+        clear_state(log_dir)
+    return len(left)

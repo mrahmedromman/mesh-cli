@@ -15,6 +15,13 @@ All notable changes to this project are recorded here. The format follows
   process id in the message. The system drops the lock when `mesh up` ends, however it ends, so a crash leaves none
   behind. Each process also writes its state file through a temporary file of its own. `mesh up` also refuses when
   the `mesh up` recorded in the state file is still running, which covers filesystems that cannot lock.
+- `mesh down` said `1 of 1 service could not be stopped.`, then exited with code 0 and deleted the state file, so
+  `mesh status` said "nothing running" while the process was still there, and a script that ran `mesh down && next-step`
+  carried on. It now exits with code 1 and keeps the record of every service it could not stop (`mesh status` shows
+  it as `stopping`, the next `mesh up` refuses to start on top of it, and `mesh down` tries again). The records of
+  the services that did stop are removed. The clean-up at the end of `mesh up` does the same, and `mesh up` then
+  exits with code 1. When the `mesh up` that `mesh down` asked to stop ends without finishing its clean-up,
+  `mesh down` now stops what is left itself, at once, instead of waiting for it.
 
 ## [0.1.3] - 2026-10-28 (Latest)
 

@@ -178,7 +178,7 @@ def test_stop_all_says_when_a_service_was_force_killed_or_already_gone(tmp_path)
     stubborn = start_stubborn(tmp_path)
     lines = []
     stuck = runner.stop_all([("old", gone.pid, None, gone), ("stubborn", stubborn.pid, None, stubborn)], 1, lines.append)
-    assert stuck == 0
+    assert stuck == []
     assert "  old was already stopped" in lines
     assert "  stopped stubborn (force-killed after 1s)" in lines
     assert lines[-1] == "All 2 services stopped."
@@ -201,7 +201,7 @@ def test_down_without_a_running_mesh_up_stops_each_service_with_progress(tmp_pat
         "services": {"one": {"pid": first.pid}, "two": {"pid": second.pid}},
     })
     lines = []
-    assert runner.stop_from_state(log_dir, out=lines.append, grace=5) is True
+    assert runner.stop_from_state(log_dir, out=lines.append, grace=5) == 0
     assert [l.strip() for l in lines if "stopping" in l] == ["stopping two ...", "stopping one ..."]
     assert lines[-1] == "All 2 services stopped."
     assert runner.read_state(log_dir) is None
@@ -232,7 +232,7 @@ def test_down_asks_a_running_mesh_up_to_stop_and_reports_each_service(tmp_path):
             time.sleep(0.2)
         assert runner.probe(a, "/") == 200 and runner.probe(b, "/") == 200
         lines = []
-        assert runner.stop_from_state(log_dir, out=lines.append, poll=0.1) is True
+        assert runner.stop_from_state(log_dir, out=lines.append, poll=0.1) == 0
         assert up.wait(timeout=30) == 0
     finally:
         if up.poll() is None:
@@ -260,7 +260,7 @@ def test_permission_denied_is_reported_not_raised(monkeypatch):
     monkeypatch.undo()
     real_killpg(child.pid, 9)
     child.wait()
-    assert stuck == 1
+    assert stuck == ["other-users-service"]
     assert any("could not stop other-users-service: permission denied" in l for l in lines)
     assert lines[-1] == "1 of 1 service could not be stopped."
 
@@ -405,7 +405,7 @@ def test_services_that_never_started_have_nothing_to_stop(tmp_path):
     }})
     assert runner.running_services(tmp_path) == []
     lines = []
-    assert not runner.stop_from_state(tmp_path, out=lines.append, grace=1)
+    assert runner.stop_from_state(tmp_path, out=lines.append, grace=1) is None
     assert lines == [] and runner.read_state(tmp_path) is None
 
 
@@ -521,7 +521,7 @@ def test_mesh_down_leaves_a_program_that_took_over_a_recorded_pid_alone(tmp_path
     runner.write_state(tmp_path, {"controller_pid": 999999, "services": {
         "llm": {"status": "running", "pid": sleeper.pid, "started": STRANGER, "port": 1, "health": "/"}}})
     lines = []
-    assert runner.stop_from_state(tmp_path, out=lines.append, grace=1) is True
+    assert runner.stop_from_state(tmp_path, out=lines.append, grace=1) == 0
     assert sleeper.poll() is None  # not signalled
     assert "  llm was already stopped" in lines and lines[-1] == "All services stopped."
     assert runner.read_state(tmp_path) is None
@@ -530,7 +530,7 @@ def test_mesh_down_leaves_a_program_that_took_over_a_recorded_pid_alone(tmp_path
 def test_mesh_down_does_not_signal_a_program_that_took_over_mesh_ups_pid(tmp_path, sleeper):
     runner.write_state(tmp_path, {"controller_pid": sleeper.pid, "controller_started": STRANGER, "services": {
         "llm": {"status": "running", "pid": 2_000_000_000, "port": 1, "health": "/"}}})
-    assert runner.stop_from_state(tmp_path, out=lambda _: None, grace=1, wait=1) is True
+    assert runner.stop_from_state(tmp_path, out=lambda _: None, grace=1, wait=1) == 0
     assert sleeper.poll() is None
     assert runner.read_state(tmp_path) is None
 
@@ -549,7 +549,7 @@ def test_a_genuine_orphan_is_still_stopped(tmp_path):
     threading.Thread(target=orphan.wait, daemon=True).start()
     runner.write_state(tmp_path, {"controller_pid": 999999, "services": {
         "llm": {"status": "running", "pid": orphan.pid, "started": runner.process_start(orphan.pid), "port": 1, "health": "/"}}})
-    assert runner.stop_from_state(tmp_path, out=lambda _: None, grace=5) is True
+    assert runner.stop_from_state(tmp_path, out=lambda _: None, grace=5) == 0
     assert not runner.group_alive(orphan.pid)
 
 
@@ -991,7 +991,7 @@ def test_mesh_down_uses_the_recorded_stop_timeout_when_mesh_up_is_gone(tmp_path)
               "stop_timeout_s": 1}}})
     lines = []
     began = time.monotonic()
-    assert runner.stop_from_state(tmp_path, out=lines.append) is True  # no grace argument either
+    assert runner.stop_from_state(tmp_path, out=lines.append) == 0  # no grace argument either
     assert "  stopped a (force-killed after 1s)" in lines
     assert time.monotonic() - began < 15
 
@@ -1001,7 +1001,7 @@ def test_a_state_file_from_an_older_version_still_gets_the_default_timeout(tmp_p
     threading.Thread(target=orphan.wait, daemon=True).start()
     runner.write_state(tmp_path, {"controller_pid": 999999, "services": {
         "a": {"status": "running", "pid": orphan.pid, "port": 1, "health": "/"}}})  # no stop_timeout_s recorded
-    assert runner.stop_from_state(tmp_path, out=lambda _: None) is True
+    assert runner.stop_from_state(tmp_path, out=lambda _: None) == 0
     assert not runner.group_alive(orphan.pid)
 
 
@@ -1361,3 +1361,89 @@ def test_the_refusal_names_the_holder_even_when_it_writes_its_pid_a_moment_after
     finally:
         writer.join()
         os.close(fd)
+
+
+# --- a stop that leaves a service running must not hide it --------------------------------------------------------------
+
+
+def kill_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    process.wait()
+
+
+def reap_in_background(*processes):
+    """`mesh down` is never the parent of the services it stops. Here the test is, so a stopped child would stay a zombie
+    in its group, which macOS reports as a refused signal. Waiting for the children in a thread reaps them."""
+    for process in processes:
+        threading.Thread(target=process.wait, daemon=True).start()
+
+
+def two_services_in_state(directory, fine, stuck, controller=0, started=None):
+    runner.write_state(directory, {"controller_pid": controller, "controller_started": started, "services": {
+        "fine": {"status": "running", "pid": fine.pid, "port": 1, "health": "/", "stop": None, "stop_timeout_s": 1},
+        "stuck": {"status": "running", "pid": stuck.pid, "port": 2, "health": "/", "stop": None, "stop_timeout_s": 1},
+    }})
+
+
+def test_mesh_down_keeps_the_record_of_a_service_it_could_not_stop(tmp_path, monkeypatch):
+    fine, stuck = start_group("sleep 60"), start_group("sleep 60")
+    reap_in_background(fine, stuck)
+    try:
+        two_services_in_state(tmp_path, fine, stuck)
+        real = runner.stop_process
+        monkeypatch.setattr(runner, "stop_process", lambda pid, *a, **k: "denied" if pid == stuck.pid else real(pid, *a, **k))
+        lines = []
+        assert runner.stop_from_state(tmp_path, out=lines.append, grace=1) == 1
+        state = runner.read_state(tmp_path)
+        assert list(state["services"]) == ["stuck"] and state["controller_pid"] == 0
+        assert state["services"]["stuck"]["status"] == "stopping" and "could not be stopped" in state["services"]["stuck"]["error"]
+        assert runner.running_services(tmp_path) == ["stuck"]  # mesh status, and the next mesh up, still know about it
+        monkeypatch.undo()
+        assert runner.stop_from_state(tmp_path, out=lines.append, grace=2) == 0  # it can be stopped now: asking again works
+        assert runner.read_state(tmp_path) is None
+    finally:
+        kill_group(fine)
+        kill_group(stuck)
+
+
+def test_mesh_down_stops_what_a_mesh_up_that_ended_early_left_running(tmp_path):
+    fine, stuck = start_group("sleep 60"), start_group("sleep 60")
+    controller = subprocess.Popen(["sleep", "60"])  # a mesh up that ends on SIGTERM without cleaning up
+    reap_in_background(fine, stuck, controller)
+    try:
+        two_services_in_state(tmp_path, fine, stuck, controller.pid, runner.process_start(controller.pid))
+        lines = []
+        assert runner.stop_from_state(tmp_path, out=lines.append, wait=20, poll=0.1, grace=2) == 0
+        assert runner.read_state(tmp_path) is None
+        assert not runner.group_alive(fine.pid) and not runner.group_alive(stuck.pid)
+    finally:
+        controller.kill()
+        controller.wait()
+        kill_group(fine)
+        kill_group(stuck)
+
+
+def test_mesh_up_keeps_the_record_of_a_service_it_could_not_stop_at_the_end(tmp_path, monkeypatch):
+    logs = tmp_path / "logs"
+    monkeypatch.setattr(runner, "stop_process", lambda pid, *a, **k: "denied")
+    lines = []
+    try:
+        left = runner.run_up(Config(services=[http_service("a", free_port(), tmp_path)]), logs, hold=lambda: False,
+                             out=lines.append, health_interval=0.2, grace=2)
+        assert left == 1 and lines[-1] == "1 of 1 service could not be stopped."
+        state = runner.read_state(logs)
+        assert list(state["services"]) == ["a"] and state["controller_pid"] == 0 and runner.running_services(logs) == ["a"]
+    finally:
+        monkeypatch.undo()
+        pid = ((runner.read_state(logs) or {}).get("services", {}).get("a") or {}).get("pid")
+        if pid:
+            os.killpg(pid, signal.SIGKILL)
+
+
+def test_mesh_up_returns_zero_when_everything_stopped(tmp_path):
+    left = runner.run_up(Config(services=[http_service("a", free_port(), tmp_path)]), tmp_path / "logs", hold=lambda: False,
+                         out=lambda _: None, health_interval=0.2, grace=5)
+    assert left == 0 and runner.read_state(tmp_path / "logs") is None

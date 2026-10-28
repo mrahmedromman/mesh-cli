@@ -621,3 +621,33 @@ def test_up_goes_ahead_when_the_recorded_mesh_up_is_gone(tmp_path, monkeypatch):
     state_with_controller(logs, gone.pid, "an earlier boot:1")
     cfg = write_cfg(tmp_path, "services:\n" + TIGHT)
     assert main(["up", cfg, "--log-dir", str(logs)]) == 0 and started == [logs]
+
+
+# --- exit codes of `mesh down` and `mesh up` when something could not be stopped ----------------------------------------
+
+
+def run_down(monkeypatch, tmp_path, result):
+    monkeypatch.setattr(cli_module.runner, "stop_from_state", lambda *a, **k: result)
+    return main(["down", "--log-dir", str(tmp_path / "logs")])
+
+
+def test_down_exits_one_and_says_so_when_a_service_could_not_be_stopped(tmp_path, monkeypatch, capsys):
+    assert run_down(monkeypatch, tmp_path, 2) == 1
+    err = capsys.readouterr().err
+    assert "2 services could not be stopped" in err and "mesh down" in err
+
+
+def test_down_exits_zero_when_everything_stopped_or_nothing_was_running(tmp_path, monkeypatch, capsys):
+    assert run_down(monkeypatch, tmp_path, 0) == 0
+    assert run_down(monkeypatch, tmp_path, None) == 0
+    assert "nothing running" in capsys.readouterr().out
+
+
+def test_up_exits_one_when_the_clean_up_left_a_service_running(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli_module, "read_gpus", idle_gpus)
+    cfg = write_cfg(tmp_path, "services:\n" + TIGHT)
+    monkeypatch.setattr(cli_module.runner, "run_up", lambda *a, **k: 1)
+    assert main(["up", cfg, "--log-dir", str(tmp_path / "logs")]) == 1
+    assert "could not be stopped" in capsys.readouterr().err
+    monkeypatch.setattr(cli_module.runner, "run_up", lambda *a, **k: 0)
+    assert main(["up", cfg, "--log-dir", str(tmp_path / "logs")]) == 0

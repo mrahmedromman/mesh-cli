@@ -234,9 +234,9 @@ def _cmd_up(args: argparse.Namespace) -> int:
     display = ui.StartupDisplay() if ui.fancy() else None
     try:
         if display:
-            runner.run_up(config, log_dir, snapshot=snapshot, out=display.out, progress=display.progress, recheck=recheck)
+            left = runner.run_up(config, log_dir, snapshot=snapshot, out=display.out, progress=display.progress, recheck=recheck)
         else:
-            runner.run_up(config, log_dir, snapshot=snapshot, recheck=recheck)
+            left = runner.run_up(config, log_dir, snapshot=snapshot, recheck=recheck)
     except runner.RunError as exc:
         print(f"error: {exc}", file=sys.stderr)
         if isinstance(exc, runner.NotEnoughMemory):
@@ -247,15 +247,25 @@ def _cmd_up(args: argparse.Namespace) -> int:
     finally:
         if display:
             display.close()
-    return 0
+    return _left_running(left)
+
+
+def _left_running(count: int) -> int:
+    """The exit code after a stop: 1, with a hint, when some services are still running."""
+    if count:
+        print(f"error: {ui.plural(count, 'service')} could not be stopped. They are still recorded: `mesh status` shows them, "
+              "and `mesh down` tries again.", file=sys.stderr)
+    return 1 if count else 0
 
 
 def _cmd_down(args: argparse.Namespace) -> int:
     out = ui.StartupDisplay().out if ui.fancy() else print
     log_dir = _dir(args)
-    if not runner.stop_from_state(log_dir, out=out):
+    left = runner.stop_from_state(log_dir, out=out)
+    if left is None:
         print(f"nothing running (looked for {log_dir / runner.STATE_FILE})")
-    return 0
+        return 0
+    return _left_running(left)
 
 
 def _gpu_pids(log_dir: Path) -> dict[str, list[int]] | None:
