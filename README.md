@@ -249,7 +249,7 @@ configs you trust. `mesh` itself sends nothing anywhere: it runs `nvidia-smi`, s
 Tests need no GPU: `pip install -e ".[dev]"` then `pytest`. The most useful contribution is real `nvidia-smi`
 output from a GPU other than an RTX 4090, added as a test fixture. Bug reports and ideas are welcome as issues.
 See [CONTRIBUTING.md](https://github.com/mrahmedromman/mesh-deck/blob/main/CONTRIBUTING.md) for the exact commands, what to include in a bug report, and what is in
-scope.
+scope. Everyone taking part is expected to follow the [Code of Conduct](https://github.com/mrahmedromman/mesh-deck/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 

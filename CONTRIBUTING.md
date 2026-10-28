@@ -2,7 +2,7 @@
 
 Thanks for helping. This project is small and early, so the most useful contributions are real-world data and
 bug reports. Please read [How it works](docs/how-it-works.md) first, especially "What it does not do", so you
-know what is in scope.
+know what is in scope. By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## The most useful thing you can send: output from your GPU
 

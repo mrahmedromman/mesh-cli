@@ -1,0 +1,36 @@
+name: Feature request
+description: An idea, or something you wish mesh did
+labels: [enhancement]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: The situation first, before the solution. For example "two of us start stacks on the same server"
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What happens today?
+      description: What you do now, and where it gets in the way
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: Optional. An idea is welcome, but the situation above matters more
+  - type: dropdown
+    id: setup
+    attributes:
+      label: How do you use mesh?
+      options:
+        - One person, one account
+        - Several people, each with their own account
+        - Several people, one shared account
+  - type: textarea
+    id: engine
+    attributes:
+      label: Engine and hardware
+      description: Optional. For example vLLM or llama.cpp, and your GPUs

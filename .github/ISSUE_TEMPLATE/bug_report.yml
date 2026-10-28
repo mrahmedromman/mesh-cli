@@ -16,6 +16,17 @@ body:
       description: OS, Python version, GPU model(s), driver version, and the engine you run (for example vLLM and its version)
     validations:
       required: true
+  - type: dropdown
+    id: setup
+    attributes:
+      label: How do you use mesh?
+      description: The behaviour differs between these, see docs/shared-server.md
+      options:
+        - One person, one account
+        - Several people, each with their own account
+        - Several people, one shared account
+    validations:
+      required: true
   - type: textarea
     id: what-happened
     attributes:
@@ -34,4 +45,16 @@ body:
     attributes:
       label: nvidia-smi output
       description: From just before the failure, if you can
+      render: text
+  - type: textarea
+    id: mesh-gpu
+    attributes:
+      label: Output of `mesh gpu`
+      description: Optional. Shows who holds each GPU's memory. It prints the first 80 characters of other programs' command lines, so check it for tokens before you paste it
+      render: text
+  - type: textarea
+    id: topology
+    attributes:
+      label: GPU topology
+      description: Optional, for services that span several GPUs. Output of `nvidia-smi topo -m`
       render: text
