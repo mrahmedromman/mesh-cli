@@ -58,7 +58,8 @@ Behaviour on other GPUs, drivers and vLLM versions is not yet known. See
 4. Right before each service starts, reads `nvidia-smi` again and checks that the memory free at that moment is
    enough for it. The plan in step 1 was made when `mesh up` began, and earlier services take a while to load, so
    another program may have taken memory since. If it is short, `mesh up` refuses to start that service, stops the
-   ones it already started, and says who holds the memory. `--force` skips this check. It cannot reserve memory:
+   ones it already started, and says who holds the memory. `--force` skips this check, but it does not create the memory,
+   so the service will usually fail at its own start-up check instead. `mesh up` cannot reserve memory:
    something that grabs it after this check still makes the service fail at startup, as described in step 7.
 5. After starting a service it polls the `health` path until it answers with a status below 500 (a `503` while a
    model loads means "not ready yet"), or the service exits, or `start_timeout_s` passes.

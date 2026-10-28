@@ -130,8 +130,10 @@ pipx install git+https://github.com/mrahmedromman/mesh-deck.git
    mesh down                # stop everything (Ctrl+C in the `mesh up` terminal does the same)
    ```
 
-If the plan says a service will not fit, `mesh up` refuses to start unless you add `--force`. It also checks again
-right before each service starts, in case another program took memory in the meantime. Output looks
+If the plan says a service will not fit, `mesh up` refuses to start. It also checks again right before each service
+starts, in case another program took memory in the meantime. `--force` skips these checks, but it does not make the
+memory appear: a service that does not get its memory usually still fails at its own start-up check, so use it only
+when you know the reading is wrong. Output looks
 like this (illustrative numbers):
 
 ```

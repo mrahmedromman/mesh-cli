@@ -19,7 +19,7 @@ Back to the [README](../README.md) · [Config reference](config.md) · [How it w
 |---|---|---|
 | `--gpus-csv FILE` | `plan` | Read GPUs from saved `nvidia-smi` output instead of running it. Handy for testing and for planning on another machine. |
 | `--external 0=417,1=4` | `plan` | Memory (MiB) already used by other programs on each GPU. Without it, `plan` counts everything currently in use as external and prints a note. |
-| `--force` | `up` | Start even if the plan, or the check right before a service starts, says it will not fit. |
+| `--force` | `up` | Skip the plan check and the check right before each service starts. It does not make the memory appear: a service that does not get it usually still fails at its own start-up check (vLLM stops with `Free memory on device ...`). Use it only when you know the memory reading is wrong. |
 | `--plan` | `up` | Print the full plan. By default `up` prints one summary line when everything fits, and the full plan only when there is something to read (a service that does not fit, a warning, or a note). `mesh plan` always prints it in full. |
 | `--log-dir DIR` | `up`, `down`, `status`, `logs`, `gpu`, `plan` | Where logs and state live. Default: the folder you chose the first time you ran `mesh up` (see [Where files go](#where-files-go)). Use the same value for every command of a stack. `gpu` and `plan` read it only to recognise your running services. |
 | `-n N` | `logs` | Show the last `N` lines. Default 50. `-n 0` shows none (useful with `-f` to see only new lines). |
@@ -59,8 +59,9 @@ in order, wait for its health check, report the memory it added, and stop everyt
 Right before each service starts, `mesh up` reads the GPUs again. Earlier services take a while to load, and another
 program may have taken memory since the plan was made. If the memory free at that moment is too little for the next
 service, `mesh up` does not start it: it stops the services it already started, prints how much is missing and who
-holds the memory (the same table as `mesh gpu`), and exits with code 1. `--force` skips this check. It cannot reserve
-memory, so a program that grabs it after this check can still make a service fail while it starts; `mesh up` then
+holds the memory (the same table as `mesh gpu`), and exits with code 1. `--force` skips this check, but it does not
+create the memory, so the service will usually fail at its own start-up check instead. `mesh up` cannot reserve
+memory either: a program that grabs it after this check can still make a service fail while it starts. `mesh up` then
 reports that failure and shows who holds the memory.
 
 If a service's main process exits after it was up (it crashed, or someone ran `kill -9` on it), `mesh up` marks it
