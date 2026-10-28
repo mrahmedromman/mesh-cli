@@ -45,7 +45,8 @@ starting things in the right order, and finding which log holds the error is ted
 
 - **Checks first.** Simulates GPU memory for your services in start order and tells you which will not fit,
   with a suggested fraction.
-- **Starts in order.** Each service waits for the previous one's health check, so they never race for memory.
+- **Starts in order.** Each service waits for the previous one's health check, so they never race for memory, and
+  `mesh up` checks the free memory again right before each start.
 - **Any runtime.** A service is a shell command: a venv, a conda environment or `docker run`.
 - **One log per service.** `mesh logs llm -f` follows one; `-n all` prints the whole file.
 - **Reports real memory.** After each start it prints how much GPU memory that service added.
@@ -129,7 +130,8 @@ pipx install git+https://github.com/mrahmedromman/mesh-deck.git
    mesh down                # stop everything (Ctrl+C in the `mesh up` terminal does the same)
    ```
 
-If the plan says a service will not fit, `mesh up` refuses to start unless you add `--force`. Output looks
+If the plan says a service will not fit, `mesh up` refuses to start unless you add `--force`. It also checks again
+right before each service starts, in case another program took memory in the meantime. Output looks
 like this (illustrative numbers):
 
 ```
