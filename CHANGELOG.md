@@ -4,6 +4,16 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- `mesh down` could be confused by a new `mesh up` that started right after the old one ended. It waited for the new
+  stack, which never finishes, and then removed the new stack's state file, so `mesh status` said "nothing running"
+  while the new services kept the GPU. It now remembers which `mesh up` it stopped, treats a state file that names a
+  different one as the end of its job, and leaves that file alone.
+- `mesh status` showed a service that could not be stopped as `stopping` even after its process had ended. It now
+  shows `stopped`.
+
 ## [0.1.4] - 2026-10-29 (Latest)
 
 ### Changed
