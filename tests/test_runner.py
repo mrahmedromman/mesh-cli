@@ -445,6 +445,12 @@ def test_a_running_service_whose_process_is_gone_shows_as_failed():
     assert row.state == "failed" and row.health == "-" and "gone" in row.error
 
 
+def test_a_service_that_was_being_stopped_shows_as_stopped_once_its_process_is_gone():
+    state = {"services": {"a": {"status": "stopping", "pid": 2_000_000_000, "port": 1, "health": "/", "error": "could not be stopped"}}}
+    [row] = runner.service_rows(state, probe_fn=fake_probe())
+    assert row.state == "stopped" and row.health == "-"
+
+
 def test_a_state_file_from_0_1_0_has_no_status_and_counts_as_running(sleeper):
     state = {"services": {"a": {"pid": sleeper.pid, "port": 1, "health": "/"}}}
     [row] = runner.service_rows(state, probe_fn=fake_probe())

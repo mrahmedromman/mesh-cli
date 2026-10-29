@@ -375,6 +375,8 @@ def service_rows(
         error = info.get("error") or ""
         if recorded in ("starting", "running") and not alive[name]:
             recorded, error = "failed", error or "the process is gone"
+        elif recorded == "stopping" and error and not alive[name]:  # kept after a failed stop (it has an error), and its process has ended since
+            recorded = "stopped"
         code = codes[name].result() if name in codes else None
         health = "-" if name not in codes else (f"HTTP {code}" if code is not None else "not answering")
         if recorded == "starting" and is_up(code):  # `mesh up` records it at its next check; this is already true
