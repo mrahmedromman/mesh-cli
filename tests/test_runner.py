@@ -1447,3 +1447,63 @@ def test_mesh_up_returns_zero_when_everything_stopped(tmp_path):
     left = runner.run_up(Config(services=[http_service("a", free_port(), tmp_path)]), tmp_path / "logs", hold=lambda: False,
                          out=lambda _: None, health_interval=0.2, grace=5)
     assert left == 0 and runner.read_state(tmp_path / "logs") is None
+
+
+# --- a new mesh up that starts right after the old one ended is not the stack mesh down was stopping -------------------
+
+
+def ignores_sigterm():
+    """A process that keeps running when asked to stop, like a mesh up in the middle of its clean-up."""
+    process = subprocess.Popen([sys.executable, "-c", "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); time.sleep(60)"],
+                               stdout=subprocess.PIPE, text=True)
+    assert process.stdout.readline().strip() == "ready"  # SIGTERM before this point would still kill it
+    return process
+
+
+def new_stack_state(controller, name="new-stack-service"):
+    return {"controller_pid": controller.pid, "controller_started": runner.process_start(controller.pid), "services": {
+        name: {"status": "running", "pid": controller.pid, "port": 2, "health": "/", "stop": None, "stop_timeout_s": 1}}}
+
+
+def test_mesh_down_does_not_wait_for_or_erase_a_new_stack_that_started_after_the_old_one_ended(tmp_path):
+    old, new = ignores_sigterm(), ignores_sigterm()
+    reap_in_background(old, new)
+    try:
+        runner.write_state(tmp_path, {"controller_pid": old.pid, "controller_started": runner.process_start(old.pid), "services": {
+            "old-stack-service": {"status": "running", "pid": 999999, "port": 1, "health": "/", "stop": None, "stop_timeout_s": 1}}})
+
+        def the_old_one_ends_and_a_new_one_starts():
+            time.sleep(0.3)
+            (tmp_path / runner.STATE_FILE).unlink()  # the old mesh up finished and removed its state
+            runner.write_state(tmp_path, new_stack_state(new))
+
+        threading.Thread(target=the_old_one_ends_and_a_new_one_starts, daemon=True).start()
+        lines = []
+        began = time.monotonic()
+        assert runner.stop_from_state(tmp_path, out=lines.append, wait=30, poll=0.1) == 0
+        assert time.monotonic() - began < 5  # it did not wait for the new stack
+        assert "  stopped old-stack-service" in lines and lines[-1] == "All services stopped."
+        assert runner.read_state(tmp_path)["controller_pid"] == new.pid  # and it left the new stack's record alone
+    finally:
+        old.kill()
+        new.kill()
+
+
+def test_mesh_down_does_not_rewrite_or_remove_a_state_that_a_new_stack_wrote_while_it_was_stopping(tmp_path, monkeypatch):
+    new = ignores_sigterm()
+    reap_in_background(new)
+    try:
+        runner.write_state(tmp_path, {"controller_pid": 0, "services": {
+            "old": {"status": "running", "pid": 999999, "port": 1, "health": "/", "stop": None, "stop_timeout_s": 1}}})
+        real = runner.stop_all
+
+        def stop_all_while_a_new_stack_starts(*args, **kwargs):
+            result = real(*args, **kwargs)
+            runner.write_state(tmp_path, new_stack_state(new))  # a new mesh up writes its state during the stop
+            return result
+
+        monkeypatch.setattr(runner, "stop_all", stop_all_while_a_new_stack_starts)
+        assert runner.stop_from_state(tmp_path, out=lambda _: None, grace=1) == 0
+        assert runner.read_state(tmp_path)["controller_pid"] == new.pid
+    finally:
+        new.kill()

@@ -541,6 +541,17 @@ def stop_all(
     return stuck
 
 
+def _another_stack(state: dict | None, controller: int) -> bool:
+    """True if the state file now belongs to a different `mesh up` than the one `mesh down` was stopping.
+
+    A `mesh up` that starts right after the old one ended writes its own state file. That file is not for `mesh down`
+    to wait for, rewrite or remove. The records of services that could not be stopped have controller 0 and still count as
+    the old stack's.
+    """
+    pid = (state or {}).get("controller_pid") or 0
+    return pid not in (0, controller)
+
+
 def keep_running(log_dir: Path, state: dict, names: list[str]) -> None:
     """After a stop that left services running, keep their records and drop the rest.
 
@@ -755,11 +766,12 @@ def stop_from_state(
             ended = False
             while time.monotonic() < deadline:
                 current = read_state(log_dir)
+                done = current is None or _another_stack(current, controller)  # its state is gone, or a new `mesh up` took the folder
                 for name in list(remaining):  # report each service as it disappears (they stop in reverse order)
-                    if current is None or not group_alive(pids[name]):
+                    if done or not group_alive(pids[name]):
                         out(f"  stopped {name}")
                         remaining.remove(name)
-                if current is None:  # `mesh up` finished its clean-up and removed the state: everything is stopped
+                if done:  # `mesh up` finished its clean-up: everything is stopped
                     out(_all_stopped(len(services)))
                     return 0
                 if not controller_alive(current):  # it has ended without finishing: do the rest here
@@ -772,6 +784,8 @@ def stop_from_state(
     # A pid that now belongs to another program is passed as 0, so only its stop command (e.g. `docker stop NAME`) runs.
     left = stop_all([(name, info["pid"] if is_ours(info["pid"], info.get("started")) else 0, info.get("stop"), None)
                      for name, info in reversed(services)], 30.0, out, graces)
+    if _another_stack(read_state(log_dir), controller):  # a new `mesh up` started meanwhile: its state is not ours to touch
+        return len(left)
     if left:
         keep_running(log_dir, state, left)
     else:
