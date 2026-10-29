@@ -28,16 +28,17 @@ All notable changes to this project are recorded here. The format follows
 - `mesh down` said `1 of 1 service could not be stopped.`, then exited with code 0 and deleted the state file, so
   `mesh status` said "nothing running" while the process was still there, and a script that ran `mesh down && next-step`
   carried on. It now exits with code 1 and keeps the record of every service it could not stop (`mesh status` shows
-  it as `stopping`, the next `mesh up` refuses to start on top of it, and `mesh down` tries again). The records of
+  it as `stopping` while its process is still there, the next `mesh up` refuses to start on top of it, and `mesh down` tries again). The records of
   the services that did stop are removed. The clean-up at the end of `mesh up` does the same, and `mesh up` then
   exits with code 1. When the `mesh up` that `mesh down` asked to stop ends without finishing its clean-up,
   `mesh down` now stops what is left itself, at once, instead of waiting for it.
 - Three mistakes in `models.yaml` failed late, or silently, and are now rejected when the config is loaded, with the
   field name in the message. `health: health` (no leading `/`) built an invalid address, so a healthy service never
   looked healthy and `mesh up` waited out the whole `start_timeout_s` (15 minutes by default) before reporting a
-  timeout; `health` must now start with `/` and use plain characters and no spaces (a character such as `é` or a typographic dash cannot be sent in a web address, so it also made the service look unhealthy; write it as `%C3%A9`). A service name such as `my/model` crashed `mesh up`
-  with a Python traceback when it tried to open `my/model.log`; a name cannot now contain `/` or `\` or be `.` or
-  `..`. `gpus: [0, 0]` counted the service's memory twice in the plan; a GPU can only be listed once.
+  timeout; `health` must now start with `/` and use plain characters and no spaces. A character such as `é` or a
+  typographic dash cannot be sent in a web address and had the same effect; write it as `%C3%A9`. A service name such
+  as `my/model` crashed `mesh up` with a Python traceback when it tried to open `my/model.log`; a name cannot now
+  contain `/` or `\` or be `.` or `..`. `gpus: [0, 0]` counted the service's memory twice in the plan; a GPU can only be listed once.
 - A file or folder problem, such as a `--log-dir` that cannot be created or a log that is not a file, ended in a long
   Python traceback. It is now one line, `error: Not a directory: /dev/null/nope`, with exit code 2. Piping
   `mesh logs NAME | head` also printed a `BrokenPipeError` traceback when `head` closed the pipe; it now ends quietly.
