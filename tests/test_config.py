@@ -95,13 +95,13 @@ def one_service(tmp_path, **fields):
     return write(tmp_path, f"services:\n  - {{{text}}}\n")
 
 
-@pytest.mark.parametrize("health", ["health", "v1/models", "http://127.0.0.1:8000/health", "' /health'", "'/health '", "'/he alth'"])
+@pytest.mark.parametrize("health", ["health", "v1/models", "http://127.0.0.1:8000/health", "' /health'", "'/health '", "'/he alth'", "/état", "'/v1–models'"])
 def test_health_must_be_a_path_that_starts_with_a_slash_and_has_no_spaces(tmp_path, health):
     with pytest.raises(ConfigError, match=r"services\.0\.health: .*health must be a path that starts with /"):
         load_config(one_service(tmp_path, health=health))
 
 
-@pytest.mark.parametrize("health", ["/", "/health", "/v1/models", "/health?ready=1", "/docs"])
+@pytest.mark.parametrize("health", ["/", "/health", "/v1/models", "/health?ready=1", "/docs", "/%C3%A9tat"])
 def test_ordinary_health_paths_are_accepted(tmp_path, health):
     assert load_config(one_service(tmp_path, health=f'"{health}"')).services[0].health == health
 

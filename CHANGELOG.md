@@ -35,7 +35,7 @@ All notable changes to this project are recorded here. The format follows
 - Three mistakes in `models.yaml` failed late, or silently, and are now rejected when the config is loaded, with the
   field name in the message. `health: health` (no leading `/`) built an invalid address, so a healthy service never
   looked healthy and `mesh up` waited out the whole `start_timeout_s` (15 minutes by default) before reporting a
-  timeout; `health` must now start with `/` and have no spaces. A service name such as `my/model` crashed `mesh up`
+  timeout; `health` must now start with `/` and use plain characters and no spaces (a character such as `é` or a typographic dash cannot be sent in a web address, so it also made the service look unhealthy; write it as `%C3%A9`). A service name such as `my/model` crashed `mesh up`
   with a Python traceback when it tried to open `my/model.log`; a name cannot now contain `/` or `\` or be `.` or
   `..`. `gpus: [0, 0]` counted the service's memory twice in the plan; a GPU can only be listed once.
 - A file or folder problem, such as a `--log-dir` that cannot be created or a log that is not a file, ended in a long

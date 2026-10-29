@@ -60,8 +60,9 @@ class Service(BaseModel):
     @field_validator("health")
     @classmethod
     def _health_is_a_path(cls, value: str) -> str:
-        if not re.fullmatch(r"/\S*", value):  # anything else makes an invalid address, and the service would never look healthy
-            raise ValueError(f"health must be a path that starts with / and has no spaces, for example /v1/models (got {value!r})")
+        if not re.fullmatch(r"/[!-~]*", value):  # anything else makes an invalid address, and the service would never look healthy
+            raise ValueError(f"health must be a path that starts with / and uses plain characters and no spaces, for example /v1/models "
+                             f"(got {value!r}; write a character such as é as %C3%A9)")
         return value
 
     @model_validator(mode="after")
